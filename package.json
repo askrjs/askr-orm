@@ -46,8 +46,9 @@
   },
   "scripts": {
     "build": "vp pack",
+    "bench": "npm run build --silent && node benchmarks/runtime.mjs --gate",
     "fmt": "vp fmt .",
-    "lint": "vp lint src tests vite.config.ts && npm run typecheck",
+    "lint": "vp lint src tests benchmarks vite.config.ts && npm run typecheck",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vp test run",
     "test:coverage": "vp test run --coverage",
@@ -55,7 +56,7 @@
     "test:types": "npm run build && tsc -p tests/types/tsconfig.json",
     "test:publint": "publint",
     "pack:check": "npm pack --ignore-scripts --dry-run --json",
-    "check": "npm run lint && npm run test:coverage && npm run test:types && npm run build && npm run test:publint && npm run pack:check",
+    "check": "npm run lint && npm run test:coverage && npm run test:types && npm run build && npm run bench && npm run test:publint && npm run pack:check",
     "prepack": "npm run build",
     "prepublishOnly": "npm run check"
   },
