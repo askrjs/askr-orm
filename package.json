@@ -1,0 +1,78 @@
+{
+  "name": "@askrjs/orm",
+  "version": "0.0.0",
+  "description": "Postgres-first, SQL-shaped micro-ORM for Askr",
+  "keywords": [
+    "askr",
+    "postgresql",
+    "orm",
+    "sql",
+    "migrations"
+  ],
+  "homepage": "https://github.com/askrjs/askr-orm#readme",
+  "bugs": {
+    "url": "https://github.com/askrjs/askr-orm/issues"
+  },
+  "license": "Apache-2.0",
+  "author": {
+    "name": "askrjs",
+    "url": "https://github.com/askrjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/askrjs/askr-orm.git"
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./tooling": {
+      "types": "./dist/tooling.d.ts",
+      "import": "./dist/tooling.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "vp pack",
+    "fmt": "vp fmt .",
+    "lint": "vp lint src tests vite.config.ts && npm run typecheck",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vp test run",
+    "test:coverage": "vp test run --coverage",
+    "test:integration": "vp test run src/integration.test.ts",
+    "test:types": "npm run build && tsc -p tests/types/tsconfig.json",
+    "test:publint": "publint",
+    "pack:check": "npm pack --ignore-scripts --dry-run --json",
+    "check": "npm run lint && npm run test:coverage && npm run test:types && npm run build && npm run test:publint && npm run pack:check",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run check"
+  },
+  "dependencies": {
+    "tsx": "^4.23.1",
+    "typescript": "^6.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "@types/pg": "^8.20.0",
+    "@vitest/coverage-v8": "^4.1.10",
+    "pg": "^8.22.0",
+    "publint": "^0.3.21",
+    "vite-plus": "^0.2.4",
+    "vitest": "^4.1.10"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  }
+}
