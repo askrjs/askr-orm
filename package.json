@@ -1,6 +1,6 @@
 {
   "name": "@askrjs/orm",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "Postgres-first, SQL-shaped micro-ORM for Askr",
   "keywords": [
     "askr",
