@@ -28,7 +28,9 @@ const groups = table("groups", {
 const users = table("users", {
   id: uuid().primaryKey().defaultRandom(),
   email: text().notNull().unique().mapWith(lowerCaseEmail),
-  groupId: uuid().notNull().references(() => groups.id),
+  groupId: uuid()
+    .notNull()
+    .references(() => groups.id),
   displayName: text(),
   createdAt: timestampTz().notNull().defaultNow(),
 });
@@ -42,9 +44,12 @@ describe("schema definitions", () => {
   });
 
   it("handles acronym and delimiter naming deterministically", () => {
-    expect(
-      ["groupId", "HTTPServerId", "display-name", "already_snake"].map(toSnakeCase),
-    ).toEqual(["group_id", "http_server_id", "display_name", "already_snake"]);
+    expect(["groupId", "HTTPServerId", "display-name", "already_snake"].map(toSnakeCase)).toEqual([
+      "group_id",
+      "http_server_id",
+      "display_name",
+      "already_snake",
+    ]);
   });
 
   it("defines Postgres enum columns", () => {

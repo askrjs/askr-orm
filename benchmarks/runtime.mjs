@@ -1,11 +1,5 @@
 import { performance } from "node:perf_hooks";
-import {
-  createDatabaseClient,
-  eq,
-  table,
-  text,
-  uuid,
-} from "../dist/index.js";
+import { createDatabaseClient, eq, table, text, uuid } from "../dist/index.js";
 
 const gate = process.argv.includes("--gate");
 const iterations = 20_000;

@@ -1,18 +1,12 @@
 import { describe, expect, it } from "vitest";
-import {
-  and,
-  compileKeyedSql,
-  compileSql,
-  eq,
-  identifier,
-  inArray,
-  sql,
-} from "./index";
+import { and, compileKeyedSql, compileSql, eq, identifier, inArray, sql } from "./index";
 
 describe("SQL boundaries", () => {
   it("parameterizes values and quotes generated identifiers", () => {
     const input = `x'); DROP TABLE users; --`;
-    expect(compileSql(sql`SELECT * FROM ${identifier("user data")} WHERE email = ${input}`)).toEqual({
+    expect(
+      compileSql(sql`SELECT * FROM ${identifier("user data")} WHERE email = ${input}`),
+    ).toEqual({
       text: 'SELECT * FROM "user data" WHERE email = $1',
       values: [input],
     });

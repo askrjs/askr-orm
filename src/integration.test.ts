@@ -1,12 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Pool, type PoolClient, type QueryResult } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type {
-  DatabaseAdapter,
-  ExecutionResult,
-  QueryOptions,
-  TransactionOptions,
-} from "./adapter";
+import type { DatabaseAdapter, ExecutionResult, QueryOptions, TransactionOptions } from "./adapter";
 import { createDatabaseClient, eq, table, text, timestampTz, uuid } from "./index";
 import { createMigrationsApi, type MigrationManifest } from "./migrations";
 import type { SqlQuery } from "./sql";
@@ -83,7 +78,9 @@ const groups = table("orm_groups", {
 const users = table("orm_users", {
   id: uuid().primaryKey().defaultRandom(),
   email: text().notNull().unique(),
-  groupId: uuid().notNull().references(() => groups.id),
+  groupId: uuid()
+    .notNull()
+    .references(() => groups.id),
   createdAt: timestampTz().notNull().defaultNow(),
 });
 
@@ -95,16 +92,16 @@ integration("PostgreSQL adapter conformance", () => {
   beforeAll(async () => {
     await pool.query('CREATE EXTENSION IF NOT EXISTS "pgcrypto"');
     await pool.query('DROP TABLE IF EXISTS "orm_users", "orm_groups" CASCADE');
-    await pool.query(
-      'CREATE TABLE "orm_groups" ("id" uuid PRIMARY KEY, "name" text NOT NULL)',
-    );
+    await pool.query('CREATE TABLE "orm_groups" ("id" uuid PRIMARY KEY, "name" text NOT NULL)');
     await pool.query(
       'CREATE TABLE "orm_users" ("id" uuid PRIMARY KEY DEFAULT gen_random_uuid(), "email" text NOT NULL UNIQUE, "group_id" uuid NOT NULL REFERENCES "orm_groups" ("id"), "created_at" timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP)',
     );
   });
 
   afterAll(async () => {
-    await pool.query('DROP TABLE IF EXISTS "_askr_migrations", "orm_migration_probe", "orm_users", "orm_groups" CASCADE');
+    await pool.query(
+      'DROP TABLE IF EXISTS "_askr_migrations", "orm_migration_probe", "orm_users", "orm_groups" CASCADE',
+    );
     await pool.end();
   });
 

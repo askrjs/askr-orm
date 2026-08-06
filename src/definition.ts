@@ -13,7 +13,11 @@ export interface DatabaseToolingAdapter {
     parameterNames: readonly string[],
   ): Promise<{
     readonly parameters: readonly string[];
-    readonly columns: readonly { readonly name: string; readonly dataType: string; readonly nullable: boolean }[];
+    readonly columns: readonly {
+      readonly name: string;
+      readonly dataType: string;
+      readonly nullable: boolean;
+    }[];
   }>;
   close?(): Promise<void>;
 }
@@ -71,10 +75,7 @@ export interface DatabaseRegistry<
 > {
   readonly kind: "database-registry";
   readonly databases: T;
-  open<K extends keyof T>(
-    name: K,
-    options?: DatabaseOpenOptions,
-  ): ReturnType<T[K]["open"]>;
+  open<K extends keyof T>(name: K, options?: DatabaseOpenOptions): ReturnType<T[K]["open"]>;
 }
 
 export function databases<

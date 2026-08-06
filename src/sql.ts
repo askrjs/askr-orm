@@ -42,9 +42,9 @@ function fragment<T = unknown>(chunks: readonly SqlChunk[]): SqlFragment<T> {
 function isFragment(value: unknown): value is SqlFragment {
   return Boolean(
     value &&
-      typeof value === "object" &&
-      SQL_FRAGMENT in value &&
-      (value as SqlFragment)[SQL_FRAGMENT],
+    typeof value === "object" &&
+    SQL_FRAGMENT in value &&
+    (value as SqlFragment)[SQL_FRAGMENT],
   );
 }
 
@@ -84,10 +84,7 @@ function sqlTag<T = unknown>(
 }
 
 interface SqlTag {
-  <T = unknown>(
-    strings: TemplateStringsArray,
-    ...values: readonly unknown[]
-  ): SqlFragment<T>;
+  <T = unknown>(strings: TemplateStringsArray, ...values: readonly unknown[]): SqlFragment<T>;
   readonly identifier: (name: string) => SqlFragment;
   readonly literal: (value: string | number | boolean | null) => SqlFragment;
   readonly unsafe: (text: string) => UnsafeSql;
@@ -152,10 +149,7 @@ export interface ColumnRef<T = unknown> {
 
 export type Expression<T = unknown> = SqlFragment<T> | ColumnRef<T>;
 
-export function columnRef<T>(
-  tableAlias: string,
-  columnName: string,
-): ColumnRef<T> {
+export function columnRef<T>(tableAlias: string, columnName: string): ColumnRef<T> {
   return { kind: "column-ref", tableAlias, columnName };
 }
 
@@ -172,7 +166,11 @@ function expressionSql(value: Expression | unknown): SqlFragment {
   return fragment([{ kind: "parameter", value }]);
 }
 
-function binary<T>(left: Expression<T>, operator: string, right: Expression<T> | T): SqlFragment<boolean> {
+function binary<T>(
+  left: Expression<T>,
+  operator: string,
+  right: Expression<T> | T,
+): SqlFragment<boolean> {
   return sql<boolean>`${expressionSql(left)} ${sql.unsafe(operator)} ${expressionSql(right)}`;
 }
 
@@ -197,15 +195,11 @@ export const isNull = (value: Expression): SqlFragment<boolean> =>
 export const isNotNull = (value: Expression): SqlFragment<boolean> =>
   sql<boolean>`${expressionSql(value)} IS NOT NULL`;
 
-export function and(
-  ...predicates: readonly SqlFragment<boolean>[]
-): SqlFragment<boolean> {
+export function and(...predicates: readonly SqlFragment<boolean>[]): SqlFragment<boolean> {
   return joinFragments(predicates, " AND ", true) as SqlFragment<boolean>;
 }
 
-export function or(
-  ...predicates: readonly SqlFragment<boolean>[]
-): SqlFragment<boolean> {
+export function or(...predicates: readonly SqlFragment<boolean>[]): SqlFragment<boolean> {
   return joinFragments(predicates, " OR ", true) as SqlFragment<boolean>;
 }
 
@@ -213,10 +207,7 @@ export function not(predicate: SqlFragment<boolean>): SqlFragment<boolean> {
   return sql<boolean>`NOT (${predicate})`;
 }
 
-export function inArray<T>(
-  value: Expression<T>,
-  values: readonly T[],
-): SqlFragment<boolean> {
+export function inArray<T>(value: Expression<T>, values: readonly T[]): SqlFragment<boolean> {
   if (values.length === 0) return sql<boolean>`FALSE`;
   return sql<boolean>`${expressionSql(value)} IN (${joinFragments(
     values.map((entry) => expressionSql(entry)),
@@ -244,10 +235,7 @@ export type TableRefs<T extends AnyTable> = {
   >;
 };
 
-export function tableRefs<T extends AnyTable>(
-  table: T,
-  alias = table.$name,
-): TableRefs<T> {
+export function tableRefs<T extends AnyTable>(table: T, alias = table.$name): TableRefs<T> {
   return Object.fromEntries(
     Object.entries(table.$columns).map(([property, value]) => [
       property,
@@ -262,31 +250,25 @@ export function compileKeyedSql(
 ): SqlQuery {
   const ordered: unknown[] = [];
   const positions = new Map<string, number>();
-  const text = query.source.replace(
-    /(?<!:):([a-z_][a-z0-9_]*)/gi,
-    (_match, name: string) => {
-      if (!(name in query.parameters)) {
-        throw new Error(`Keyed SQL ${query.key} uses undeclared parameter :${name}.`);
-      }
-      if (!(name in values)) {
-        throw new Error(`Keyed SQL ${query.key} is missing parameter ${name}.`);
-      }
-      let position = positions.get(name);
-      if (position === undefined) {
-        ordered.push(values[name]);
-        position = ordered.length;
-        positions.set(name, position);
-      }
-      return `$${position}`;
-    },
-  );
+  const text = query.source.replace(/(?<!:):([a-z_][a-z0-9_]*)/gi, (_match, name: string) => {
+    if (!(name in query.parameters)) {
+      throw new Error(`Keyed SQL ${query.key} uses undeclared parameter :${name}.`);
+    }
+    if (!(name in values)) {
+      throw new Error(`Keyed SQL ${query.key} is missing parameter ${name}.`);
+    }
+    let position = positions.get(name);
+    if (position === undefined) {
+      ordered.push(values[name]);
+      position = ordered.length;
+      positions.set(name, position);
+    }
+    return `$${position}`;
+  });
   return { text, values: ordered };
 }
 
-export async function executeKeyedSql<
-  TParameters extends Record<string, unknown>,
-  TResult,
->(
+export async function executeKeyedSql<TParameters extends Record<string, unknown>, TResult>(
   adapter: DatabaseAdapter,
   query: KeyedSql<TParameters, TResult>,
   values: TParameters,
@@ -294,10 +276,7 @@ export async function executeKeyedSql<
 ): Promise<readonly TResult[]> {
   try {
     const result = await adapter.execute<TResult>(
-      compileKeyedSql(
-        query as KeyedSql<Record<string, unknown>, unknown>,
-        values,
-      ),
+      compileKeyedSql(query as KeyedSql<Record<string, unknown>, unknown>, values),
       { ...options, preparedName: query.key },
     );
     return result.rows;

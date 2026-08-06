@@ -20,7 +20,9 @@ import { groups } from "./groups";
 export const users = table("users", {
   id: uuid().primaryKey().defaultRandom(),
   email: text().notNull().unique(),
-  groupId: uuid().notNull().references(() => groups.id),
+  groupId: uuid()
+    .notNull()
+    .references(() => groups.id),
   createdAt: timestampTz().notNull().defaultNow(),
 });
 ```
@@ -88,10 +90,7 @@ await db.users.insert({ email, groupId }); // { rowsAffected }
 await db.users.update(userId, { email }); // { rowsAffected }
 await db.users.delete(userId); // { rowsAffected }
 
-const user = await db.users.insert(
-  { email, groupId },
-  { returning: "row" },
-);
+const user = await db.users.insert({ email, groupId }, { returning: "row" });
 
 await db.users.insertMany(rows, { chunkSize: 500 });
 await db.users.upsertMany(rows, { chunkSize: 500 });
@@ -136,10 +135,7 @@ identifiers must come from generated descriptors or `sql.identifier`.
 Static SQL can live anywhere in project source:
 
 ```ts
-export const userByEmail = sql.key(
-  "users.by-email",
-  { email: "" as string },
-)`
+export const userByEmail = sql.key("users.by-email", { email: "" as string })`
   SELECT id, email
   FROM users
   WHERE email = :email

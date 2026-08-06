@@ -47,7 +47,10 @@ interface QueryState {
   readonly predicates: readonly SqlFragment<boolean>[];
   readonly groups: readonly Expression[];
   readonly having?: SqlFragment<boolean>;
-  readonly order: readonly { readonly expression: Expression; readonly direction: "ASC" | "DESC" }[];
+  readonly order: readonly {
+    readonly expression: Expression;
+    readonly direction: "ASC" | "DESC";
+  }[];
   readonly limit?: number;
   readonly offset?: number;
   readonly distinct: boolean;
@@ -69,10 +72,7 @@ function expressionQuery(expression: Expression): SqlQuery {
   return compileSql(expression as SqlFragment);
 }
 
-function appendQuery(
-  target: { text: string; values: unknown[] },
-  query: SqlQuery,
-): void {
+function appendQuery(target: { text: string; values: unknown[] }, query: SqlQuery): void {
   const offset = target.values.length;
   target.text += query.text.replace(/\$(\d+)/g, (_match, index: string) => {
     return `$${Number(index) + offset}`;
@@ -163,9 +163,7 @@ function mapRows<Row>(
   aliases: readonly string[],
 ): readonly Row[] {
   return rows.map((row) =>
-    Object.freeze(
-      Object.fromEntries(aliases.map((alias) => [alias, row[alias]])),
-    ),
+    Object.freeze(Object.fromEntries(aliases.map((alias) => [alias, row[alias]]))),
   ) as unknown as readonly Row[];
 }
 
@@ -178,7 +176,8 @@ export class SelectQuery<Row, Refs extends AnyReferences> {
   where(
     predicate: SqlFragment<boolean> | ((refs: Refs) => SqlFragment<boolean>),
   ): SelectQuery<Row, Refs> {
-    const resolved = typeof predicate === "function" ? predicate(this.state.references as Refs) : predicate;
+    const resolved =
+      typeof predicate === "function" ? predicate(this.state.references as Refs) : predicate;
     return new SelectQuery(this.adapter, {
       ...this.state,
       predicates: [...this.state.predicates, resolved],
@@ -253,9 +252,7 @@ export class SelectQuery<Row, Refs extends AnyReferences> {
     return new SelectQuery(this.adapter, {
       ...this.state,
       selection:
-        typeof projection === "function"
-          ? projection(this.state.references as Refs)
-          : projection,
+        typeof projection === "function" ? projection(this.state.references as Refs) : projection,
     });
   }
 
@@ -370,10 +367,9 @@ type NullableReferences<Refs extends AnyReferences> = {
   };
 };
 
-type ExistingJoinRefs<
-  Refs extends AnyReferences,
-  Nullable extends boolean,
-> = Nullable extends true ? NullableReferences<Refs> : Refs;
+type ExistingJoinRefs<Refs extends AnyReferences, Nullable extends boolean> = Nullable extends true
+  ? NullableReferences<Refs>
+  : Refs;
 
 export class PendingJoin<
   _Row,
@@ -402,29 +398,19 @@ export class PendingJoin<
     predicate: (
       refs: JoinedRefs<ExistingJoinRefs<Refs, ExistingNullable>, T, Alias, Nullable>,
     ) => SqlFragment<boolean>,
-  ): JoinedQuery<
-    JoinedRefs<ExistingJoinRefs<Refs, ExistingNullable>, T, Alias, Nullable>
-  > {
+  ): JoinedQuery<JoinedRefs<ExistingJoinRefs<Refs, ExistingNullable>, T, Alias, Nullable>> {
     const references = {
       ...this.state.references,
       [this.alias]: tableRefs(this.table, this.alias),
     };
     const on = predicate(
-      references as JoinedRefs<
-        ExistingJoinRefs<Refs, ExistingNullable>,
-        T,
-        Alias,
-        Nullable
-      >,
+      references as JoinedRefs<ExistingJoinRefs<Refs, ExistingNullable>, T, Alias, Nullable>,
     );
     const { selection: _selection, ...stateWithoutSelection } = this.state;
     return new JoinedQuery(this.adapter, {
       ...stateWithoutSelection,
       references,
-      joins: [
-        ...this.state.joins,
-        { type: this.type, table: this.table, alias: this.alias, on },
-      ],
+      joins: [...this.state.joins, { type: this.type, table: this.table, alias: this.alias, on }],
     });
   }
 }
@@ -441,9 +427,7 @@ export class JoinedQuery<Refs extends AnyReferences> {
     return new SelectQuery(this.adapter, {
       ...this.state,
       selection:
-        typeof projection === "function"
-          ? projection(this.state.references as Refs)
-          : projection,
+        typeof projection === "function" ? projection(this.state.references as Refs) : projection,
     });
   }
 

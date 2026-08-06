@@ -50,11 +50,7 @@ export interface MigrationApplyResult {
 export interface MigrationsApi {
   plan(options?: QueryOptions): Promise<MigrationPlan>;
   apply(options?: MigrationApplyOptions): Promise<MigrationApplyResult>;
-  resolve(
-    id: string,
-    resolution: "applied" | "rolled-back",
-    options?: QueryOptions,
-  ): Promise<void>;
+  resolve(id: string, resolution: "applied" | "rolled-back", options?: QueryOptions): Promise<void>;
 }
 
 const LOCK_KEY = "4707438161740729";
@@ -160,16 +156,13 @@ async function applyOne(
   const started = performance.now();
   options.onEvent?.({ type: "started", migration: migration.id });
   if (migration.transactional) {
-    await adapter.transaction(async (transaction) => {
-      await transaction.execute({ text: migration.sql, values: [] }, options);
-      await recordState(
-        transaction,
-        migration,
-        "applied",
-        performance.now() - started,
-        options,
-      );
-    }, options.signal === undefined ? {} : { signal: options.signal });
+    await adapter.transaction(
+      async (transaction) => {
+        await transaction.execute({ text: migration.sql, values: [] }, options);
+        await recordState(transaction, migration, "applied", performance.now() - started, options);
+      },
+      options.signal === undefined ? {} : { signal: options.signal },
+    );
   } else {
     await recordState(adapter, migration, "applying", null, options);
     try {

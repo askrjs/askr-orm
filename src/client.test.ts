@@ -49,10 +49,7 @@ describe("database client", () => {
 
     adapter.rows = [{ id: "u", email: "a@example.com", group_id: "g" }];
     await expect(
-      db.users.insert(
-        { email: "a@example.com", groupId: "g" },
-        { returning: "row" },
-      ),
+      db.users.insert({ email: "a@example.com", groupId: "g" }, { returning: "row" }),
     ).resolves.toEqual({ id: "u", email: "a@example.com", groupId: "g" });
   });
 
@@ -89,8 +86,7 @@ describe("database client", () => {
       }))
       .where(({ users: userColumns }) => eq(userColumns.email, "a@example.com"));
     expect(query.toSQL()).toEqual({
-      text:
-        'SELECT "users"."email" AS "email", "groups"."name" AS "groupName" FROM "public"."users" AS "users" LEFT JOIN "public"."groups" AS "groups" ON "users"."group_id" = "groups"."id" WHERE ("users"."email" = $1)',
+      text: 'SELECT "users"."email" AS "email", "groups"."name" AS "groupName" FROM "public"."users" AS "users" LEFT JOIN "public"."groups" AS "groups" ON "users"."group_id" = "groups"."id" WHERE ("users"."email" = $1)',
       values: ["a@example.com"],
     });
   });
