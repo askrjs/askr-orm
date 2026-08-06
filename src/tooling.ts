@@ -1113,9 +1113,7 @@ export async function hasDatabaseEntry(cwd: string): Promise<boolean> {
   );
 }
 
-export async function validateDiscoveredDatabase(
-  cwd: string,
-): Promise<{
+export async function validateDiscoveredDatabase(cwd: string): Promise<{
   readonly status: "passed" | "failed";
   readonly stdout: string;
   readonly stderr: string;
