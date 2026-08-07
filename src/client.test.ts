@@ -36,7 +36,7 @@ const users = table("users", {
 });
 
 describe("database client", () => {
-  it("uses status-first CRUD and explicit returning", async () => {
+  it("should use status-first CRUD and explicit returning", async () => {
     const adapter = new RecordingAdapter();
     const db = createDatabaseClient({ users, groups }, adapter);
     expect(await db.users.insert({ email: "a@example.com", groupId: "g" })).toEqual({
@@ -53,7 +53,7 @@ describe("database client", () => {
     ).resolves.toEqual({ id: "u", email: "a@example.com", groupId: "g" });
   });
 
-  it("does not create implicit transactions for bulk writes or batches", async () => {
+  it("should not create implicit transactions for bulk writes or batches", async () => {
     const adapter = new RecordingAdapter();
     const db = createDatabaseClient({ users }, adapter);
     await db.users.insertMany([
@@ -72,7 +72,7 @@ describe("database client", () => {
     expect(adapter.transactions).toBe(1);
   });
 
-  it("requires explicit join projection and compiles null-safe left joins", () => {
+  it("should require explicit join projection and compile null-safe left joins", () => {
     const adapter = new RecordingAdapter();
     const db = createDatabaseClient({ users, groups }, adapter);
     const query = db.users
@@ -91,7 +91,7 @@ describe("database client", () => {
     });
   });
 
-  it("rejects self-joins without aliases", () => {
+  it("should reject self-joins without aliases", () => {
     const db = createDatabaseClient({ users }, new RecordingAdapter());
     expect(() => db.users.join(db.users)).toThrow(/self-joins require an explicit alias/);
     expect(() => db.users.join(db.users, { as: "otherUsers" })).not.toThrow();

@@ -36,14 +36,14 @@ const users = table("users", {
 });
 
 describe("schema definitions", () => {
-  it("maps property names and preserves relational metadata without connecting", () => {
+  it("should map property names and preserve relational metadata without connecting", () => {
     expect(users.groupId.ast.name).toBe("group_id");
     expect(users.createdAt.ast.default).toBe("CURRENT_TIMESTAMP");
     expect(users.groupId.ast.references?.()).toBe(groups.id);
     expect(users.email.ast.codec?.encode("USER@EXAMPLE.COM")).toBe("user@example.com");
   });
 
-  it("handles acronym and delimiter naming deterministically", () => {
+  it("should handle acronym and delimiter naming deterministically", () => {
     expect(["groupId", "HTTPServerId", "display-name", "already_snake"].map(toSnakeCase)).toEqual([
       "group_id",
       "http_server_id",
@@ -52,12 +52,12 @@ describe("schema definitions", () => {
     ]);
   });
 
-  it("defines Postgres enum columns", () => {
+  it("should define Postgres enum columns", () => {
     const status = postgresEnum("account_status", ["active", "disabled"]);
     expect(status.column().ast.dataType).toBe("public.account_status");
   });
 
-  it("infers readonly rows, inserts, patches, and primary keys", () => {
+  it("should infer readonly rows, inserts, patches, and primary keys", () => {
     expectTypeOf<InferRow<typeof users>>().toEqualTypeOf<
       Readonly<{
         id: string;

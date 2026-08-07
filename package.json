@@ -1,6 +1,6 @@
 {
   "name": "@askrjs/orm",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Postgres-first, SQL-shaped micro-ORM for Askr",
   "keywords": [
     "askr",
@@ -61,10 +61,10 @@
     "prepublishOnly": "npm run check"
   },
   "dependencies": {
-    "tsx": "^4.23.9"
+    "tsx": "^4.23.11"
   },
   "devDependencies": {
-    "@types/node": "^26.1.2",
+    "@types/node": "^26.2.0",
     "@types/pg": "^8.20.4",
     "@vitest/coverage-v8": "^4.1.10",
     "pg": "^8.22.0",
