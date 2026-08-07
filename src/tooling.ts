@@ -5,11 +5,7 @@ import { createInterface } from "node:readline/promises";
 import { pathToFileURL } from "node:url";
 import { tsImport } from "tsx/esm/api";
 import type { DatabaseAdapter } from "./adapter";
-import type {
-  DatabaseDefinition,
-  DatabaseRegistry,
-  DatabaseToolingAdapter,
-} from "./definition";
+import type { DatabaseDefinition, DatabaseRegistry, DatabaseToolingAdapter } from "./definition";
 import type { BundledMigration, MigrationManifest } from "./migrations";
 import { quoteIdentifier, singularTypeName } from "./naming";
 import type {
@@ -31,8 +27,7 @@ export interface RunDatabaseCliOptions {
   readonly confirm?: (message: string) => Promise<boolean>;
 }
 
-export interface SnapshotColumn
-  extends Omit<ColumnAst, "codec" | "references" | "property"> {
+export interface SnapshotColumn extends Omit<ColumnAst, "codec" | "references" | "property"> {
   readonly property: string;
   readonly reference?: {
     readonly schema: string;
@@ -121,9 +116,7 @@ function columnSnapshot(property: string, column: AnyTable["$columns"][string]):
     ...(column.ast.codec === undefined ? {} : { codec: column.ast.codec.name }),
     ...(column.ast.renamedFrom === undefined ? {} : { renamedFrom: column.ast.renamedFrom }),
     ...(column.ast.drop === undefined ? {} : { drop: column.ast.drop }),
-    ...(column.ast.convertUsing === undefined
-      ? {}
-      : { convertUsing: column.ast.convertUsing }),
+    ...(column.ast.convertUsing === undefined ? {} : { convertUsing: column.ast.convertUsing }),
   };
 }
 
@@ -142,20 +135,22 @@ export function snapshotDefinition(
     }
   }
   const tables = Object.values(definition.tables)
-    .map((table): SnapshotTable => ({
-      schema: table.$schema,
-      name: table.$name,
-      ...(table.$options.renamedFrom === undefined
-        ? {}
-        : { renamedFrom: table.$options.renamedFrom }),
-      ...(table.$options.drop === undefined ? {} : { drop: table.$options.drop }),
-      columns: Object.entries(table.$columns)
-        .map(([property, column]) => columnSnapshot(property, column))
-        .sort((left, right) => left.name.localeCompare(right.name)),
-      constraints: [...(table.$options.constraints ?? [])].sort((left, right) =>
-        JSON.stringify(left).localeCompare(JSON.stringify(right)),
-      ),
-    }))
+    .map(
+      (table): SnapshotTable => ({
+        schema: table.$schema,
+        name: table.$name,
+        ...(table.$options.renamedFrom === undefined
+          ? {}
+          : { renamedFrom: table.$options.renamedFrom }),
+        ...(table.$options.drop === undefined ? {} : { drop: table.$options.drop }),
+        columns: Object.entries(table.$columns)
+          .map(([property, column]) => columnSnapshot(property, column))
+          .sort((left, right) => left.name.localeCompare(right.name)),
+        constraints: [...(table.$options.constraints ?? [])].sort((left, right) =>
+          JSON.stringify(left).localeCompare(JSON.stringify(right)),
+        ),
+      }),
+    )
     .sort((left, right) =>
       `${left.schema}.${left.name}`.localeCompare(`${right.schema}.${right.name}`),
     );
@@ -255,7 +250,8 @@ function renderInitialSchema(snapshot: SchemaSnapshot): string {
     ...snapshot.views.map((entry) => entry.schema),
   ]);
   for (const schema of [...schemas].sort()) {
-    if (schema !== "public") statements.push(`CREATE SCHEMA IF NOT EXISTS ${quoteIdentifier(schema)};`);
+    if (schema !== "public")
+      statements.push(`CREATE SCHEMA IF NOT EXISTS ${quoteIdentifier(schema)};`);
   }
   for (const value of snapshot.enums) {
     statements.push(
@@ -426,7 +422,8 @@ export function diffSnapshots(current: SchemaSnapshot, desiredInput: SchemaSnaps
   const desiredViews = byName(desired.views);
   for (const view of desired.views) {
     const old = currentViews.get(`${view.schema}.${view.name}`);
-    if (!old) statements.push(`CREATE VIEW ${qualified(view.schema, view.name)} AS\n${view.query};`);
+    if (!old)
+      statements.push(`CREATE VIEW ${qualified(view.schema, view.name)} AS\n${view.query};`);
     else if (old.query !== view.query) {
       statements.push(
         `CREATE OR REPLACE VIEW ${qualified(view.schema, view.name)} AS\n${view.query};`,
@@ -451,7 +448,8 @@ function parseMigration(content: string, file: string): BundledMigration {
   if (!id || parentValue === undefined || !transactionalValue) {
     throw new Error(`Migration ${file} is missing required askr headers.`);
   }
-  if (!file.startsWith(`${id}.`)) throw new Error(`Migration file ${file} does not match id ${id}.`);
+  if (!file.startsWith(`${id}.`))
+    throw new Error(`Migration file ${file} does not match id ${id}.`);
   return {
     id,
     parent: parentValue === "none" ? null : parentValue,
@@ -472,7 +470,9 @@ async function readMigrations(databaseDir: string): Promise<MigrationManifest> {
     entries
       .filter((file) => file.endsWith(".sql"))
       .sort()
-      .map(async (file) => parseMigration(await fs.readFile(path.join(directory, file), "utf8"), file)),
+      .map(async (file) =>
+        parseMigration(await fs.readFile(path.join(directory, file), "utf8"), file),
+      ),
   );
   let parent: string | null = null;
   for (const migration of migrations) {
@@ -503,7 +503,9 @@ function ulid(): string {
   return `${time}${encodeBase32(random, 16)}`;
 }
 
-async function findDatabaseEntry(start: string): Promise<{ projectRoot: string; databaseDir: string }> {
+async function findDatabaseEntry(
+  start: string,
+): Promise<{ projectRoot: string; databaseDir: string }> {
   let current = path.resolve(start);
   while (true) {
     const candidate = path.join(current, "database", "index.ts");
@@ -512,7 +514,9 @@ async function findDatabaseEntry(start: string): Promise<{ projectRoot: string; 
     }
     const parent = path.dirname(current);
     if (parent === current) {
-      throw new Error("No database/index.ts found. Run this command from an Askr database project.");
+      throw new Error(
+        "No database/index.ts found. Run this command from an Askr database project.",
+      );
     }
     current = parent;
   }
@@ -682,14 +686,12 @@ function renderMetadata(snapshot: SchemaSnapshot): string {
 }
 
 function renderQueries(descriptions: readonly KeyedSqlDescription[]): string {
-  const lines = [
-    "// Generated by @askrjs/orm. Do not edit.",
-    "export interface DatabaseQueries {",
-  ];
+  const lines = ["// Generated by @askrjs/orm. Do not edit.", "export interface DatabaseQueries {"];
   for (const query of descriptions) {
     lines.push(`  readonly ${JSON.stringify(query.key)}: {`);
     lines.push("    readonly parameters: {");
-    for (const parameter of query.parameters) lines.push(`      readonly ${JSON.stringify(parameter)}: unknown;`);
+    for (const parameter of query.parameters)
+      lines.push(`      readonly ${JSON.stringify(parameter)}: unknown;`);
     lines.push("    };", "    readonly row: {");
     for (const column of query.columns) {
       lines.push(
@@ -727,9 +729,7 @@ function generatedArtifacts(
   };
 }
 
-async function replay(
-  database: LoadedDatabase,
-): Promise<{
+async function replay(database: LoadedDatabase): Promise<{
   readonly scratch: DatabaseToolingAdapter;
   readonly manifest: MigrationManifest;
   readonly current: SchemaSnapshot;
@@ -832,10 +832,7 @@ async function generateOne(database: LoadedDatabase): Promise<string | null> {
     }
     const manifest = await readMigrations(database.databaseDir);
     const descriptions = await describeKeyedSql(database.projectRoot, replayed.scratch);
-    await writeArtifacts(
-      database,
-      generatedArtifacts(database, desired, descriptions, manifest),
-    );
+    await writeArtifacts(database, generatedArtifacts(database, desired, descriptions, manifest));
     return created;
   } catch (error) {
     if (created) await fs.unlink(created).catch(() => undefined);
@@ -975,7 +972,9 @@ async function targetAdapter(database: LoadedDatabase): Promise<DatabaseAdapter>
     adapter.identity === database.definition.scratchIdentity
   ) {
     await adapter.close?.();
-    throw new Error("Target and scratch database identities are equal; refusing migration command.");
+    throw new Error(
+      "Target and scratch database identities are equal; refusing migration command.",
+    );
   }
   return adapter;
 }
@@ -999,12 +998,7 @@ export async function runDatabaseCli(
     const loaded = await loadDatabases(parsed.cwd);
     const action = parsed.command.join(" ");
     const migrationCommand = parsed.command[0] === "migration";
-    const selected = selectDatabases(
-      loaded,
-      parsed.database,
-      parsed.all,
-      migrationCommand,
-    );
+    const selected = selectDatabases(loaded, parsed.database, parsed.all, migrationCommand);
     const results: unknown[] = [];
     for (const database of selected) {
       if (action === "validate") {
@@ -1088,7 +1082,10 @@ export async function runDatabaseCli(
       for (const result of results) {
         const value = result as Record<string, unknown>;
         if (value.plan) {
-          const plan = value.plan as { pending: readonly BundledMigration[]; applied: readonly unknown[] };
+          const plan = value.plan as {
+            pending: readonly BundledMigration[];
+            applied: readonly unknown[];
+          };
           io.log(
             `${value.database}: ${plan.applied.length} applied, ${plan.pending.length} pending`,
           );
@@ -1103,9 +1100,7 @@ export async function runDatabaseCli(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     io.error(
-      args.includes("--json")
-        ? JSON.stringify({ status: "error", error: message })
-        : message,
+      args.includes("--json") ? JSON.stringify({ status: "error", error: message }) : message,
     );
     return 1;
   }
@@ -1118,9 +1113,11 @@ export async function hasDatabaseEntry(cwd: string): Promise<boolean> {
   );
 }
 
-export async function validateDiscoveredDatabase(
-  cwd: string,
-): Promise<{ readonly status: "passed" | "failed"; readonly stdout: string; readonly stderr: string }> {
+export async function validateDiscoveredDatabase(cwd: string): Promise<{
+  readonly status: "passed" | "failed";
+  readonly stdout: string;
+  readonly stderr: string;
+}> {
   const logs: string[] = [];
   const errors: string[] = [];
   const code = await runDatabaseCli(["validate", "--cwd", cwd], {

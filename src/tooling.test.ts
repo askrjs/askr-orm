@@ -47,9 +47,9 @@ const usersSnapshot: SchemaSnapshot = {
 
 afterEach(async () => {
   await Promise.all(
-    temporaryDirectories.splice(0).map((directory) =>
-      fs.rm(directory, { recursive: true, force: true }),
-    ),
+    temporaryDirectories
+      .splice(0)
+      .map((directory) => fs.rm(directory, { recursive: true, force: true })),
   );
 });
 
@@ -65,9 +65,7 @@ describe("schema migration generation", () => {
   });
 
   it("requires explicit intent for destructive and ambiguous changes", () => {
-    expect(() => diffSnapshots(usersSnapshot, empty)).toThrow(
-      /Dropping table users requires/,
-    );
+    expect(() => diffSnapshots(usersSnapshot, empty)).toThrow(/Dropping table users requires/);
     const changed: SchemaSnapshot = {
       ...usersSnapshot,
       tables: [

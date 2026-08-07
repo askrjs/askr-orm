@@ -26,11 +26,7 @@ export {
   type DatabaseToolingAdapter,
   type DefineDatabaseOptions,
 } from "./definition";
-export {
-  DatabaseError,
-  normalizeDatabaseError,
-  type DatabaseErrorCategory,
-} from "./errors";
+export { DatabaseError, normalizeDatabaseError, type DatabaseErrorCategory } from "./errors";
 export {
   type AppliedMigration,
   type BundledMigration,

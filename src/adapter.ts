@@ -30,10 +30,7 @@ export interface DatabaseAdapter {
 }
 
 export interface TransactionOptions {
-  readonly isolation?:
-    | "read committed"
-    | "repeatable read"
-    | "serializable";
+  readonly isolation?: "read committed" | "repeatable read" | "serializable";
   readonly readOnly?: boolean;
   readonly signal?: AbortSignal;
 }

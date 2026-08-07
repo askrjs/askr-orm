@@ -54,9 +54,7 @@ export class ColumnBuilder<
     N extends boolean = NotNull,
     D extends boolean = HasDefault,
     P extends boolean = Primary,
-  >(
-    patch: Partial<Omit<ColumnAst, "property">>,
-  ): ColumnBuilder<T, N, D, P> {
+  >(patch: Partial<Omit<ColumnAst, "property">>): ColumnBuilder<T, N, D, P> {
     return new ColumnBuilder<T, N, D, P>({ ...this.ast, ...patch });
   }
 
@@ -92,9 +90,7 @@ export class ColumnBuilder<
     return this.copy<NotNull, true, Primary>({ generated: expression });
   }
 
-  references(
-    target: () => AnyColumn,
-  ): ColumnBuilder<T, NotNull, HasDefault, Primary> {
+  references(target: () => AnyColumn): ColumnBuilder<T, NotNull, HasDefault, Primary> {
     return this.copy({ references: target });
   }
 
@@ -121,11 +117,12 @@ export class ColumnBuilder<
 }
 
 export type AnyColumn = ColumnBuilder<unknown, boolean, boolean, boolean>;
-export type ColumnValue<C> = C extends ColumnBuilder<infer T, infer N, boolean, boolean>
-  ? N extends true
-    ? T
-    : T | null
-  : never;
+export type ColumnValue<C> =
+  C extends ColumnBuilder<infer T, infer N, boolean, boolean>
+    ? N extends true
+      ? T
+      : T | null
+    : never;
 type RequiredInsertKeys<C extends Record<string, AnyColumn>> = {
   [K in keyof C]: C[K] extends ColumnBuilder<unknown, true, false> ? K : never;
 }[keyof C];
@@ -164,10 +161,7 @@ export interface TableOptions {
   readonly constraints?: readonly TableConstraint[];
 }
 
-export type TableDefinition<
-  C extends Record<string, AnyColumn>,
-  Name extends string = string,
-> = {
+export type TableDefinition<C extends Record<string, AnyColumn>, Name extends string = string> = {
   readonly [K in keyof C]: C[K];
 } & {
   readonly $kind: "table";
@@ -191,10 +185,7 @@ export type InferInsert<T extends AnyTable> = Readonly<
   {
     [K in RequiredInsertKeys<T["$columns"]>]: ColumnValue<T["$columns"][K]>;
   } & {
-    [K in OptionalInsertKeys<T["$columns"]>]?: Exclude<
-      ColumnValue<T["$columns"][K]>,
-      null
-    > | null;
+    [K in OptionalInsertKeys<T["$columns"]>]?: Exclude<ColumnValue<T["$columns"][K]>, null> | null;
   }
 >;
 export type InferPatch<T extends AnyTable> = Readonly<
@@ -239,10 +230,8 @@ export const numeric = (precision?: number, scale?: number): ColumnBuilder<strin
 export const json = <T = unknown>(): ColumnBuilder<T> => column<T>("json");
 export const jsonb = <T = unknown>(): ColumnBuilder<T> => column<T>("jsonb");
 export const date = (): ColumnBuilder<string> => column<string>("date");
-export const timestamp = (): ColumnBuilder<string> =>
-  column<string>("timestamp without time zone");
-export const timestampTz = (): ColumnBuilder<string> =>
-  column<string>("timestamp with time zone");
+export const timestamp = (): ColumnBuilder<string> => column<string>("timestamp without time zone");
+export const timestampTz = (): ColumnBuilder<string> => column<string>("timestamp with time zone");
 export const bytea = (): ColumnBuilder<Uint8Array> => column<Uint8Array>("bytea");
 export const postgresType = <T>(name: string): ColumnBuilder<T> => column<T>(name);
 
@@ -269,10 +258,7 @@ export function postgresEnum<const V extends readonly [string, ...string[]]>(
   };
 }
 
-export function table<
-  const Name extends string,
-  const C extends Record<string, AnyColumn>,
->(
+export function table<const Name extends string, const C extends Record<string, AnyColumn>>(
   name: Name,
   columns: C,
   options: TableOptions = {},
@@ -286,17 +272,13 @@ export function table<
       }),
     ]),
   ) as C;
-  return Object.assign(
-    {},
-    normalized,
-    {
-      $kind: "table" as const,
-      $name: name,
-      $schema: options.schema ?? "public",
-      $columns: normalized,
-      $options: options,
-    },
-  );
+  return Object.assign({}, normalized, {
+    $kind: "table" as const,
+    $name: name,
+    $schema: options.schema ?? "public",
+    $columns: normalized,
+    $options: options,
+  });
 }
 
 export const check = (expression: string, name?: string): CheckConstraint => ({
@@ -305,10 +287,7 @@ export const check = (expression: string, name?: string): CheckConstraint => ({
   ...(name === undefined ? {} : { name }),
 });
 
-export const unique = (
-  columns: readonly string[],
-  name?: string,
-): UniqueConstraint => ({
+export const unique = (columns: readonly string[], name?: string): UniqueConstraint => ({
   kind: "unique",
   columns,
   ...(name === undefined ? {} : { name }),

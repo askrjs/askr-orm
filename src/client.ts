@@ -7,14 +7,7 @@ import type {
   TransactionOptions,
 } from "./adapter";
 import { normalizeDatabaseError } from "./errors";
-import type {
-  AnyTable,
-  ColumnValue,
-  InferInsert,
-  InferKey,
-  InferPatch,
-  InferRow,
-} from "./schema";
+import type { AnyTable, ColumnValue, InferInsert, InferKey, InferPatch, InferRow } from "./schema";
 import { quoteIdentifier } from "./naming";
 import { tableQuery, type References, type SelectQuery } from "./query";
 import type { SqlQuery } from "./sql";
@@ -47,17 +40,12 @@ function encode(column: AnyTable["$columns"][string], value: unknown): unknown {
   return column.ast.codec ? column.ast.codec.encode(value) : value;
 }
 
-function decodeRow<T extends AnyTable>(
-  table: T,
-  row: Record<string, unknown>,
-): InferRow<T> {
+function decodeRow<T extends AnyTable>(table: T, row: Record<string, unknown>): InferRow<T> {
   return Object.freeze(
     Object.fromEntries(
       Object.entries(table.$columns).map(([property, column]) => [
         property,
-        column.ast.codec
-          ? column.ast.codec.decode(row[column.ast.name])
-          : row[column.ast.name],
+        column.ast.codec ? column.ast.codec.decode(row[column.ast.name]) : row[column.ast.name],
       ]),
     ),
   ) as InferRow<T>;
@@ -148,18 +136,12 @@ export class TableClient<T extends AnyTable> {
     this.query().where(predicate);
   join: SelectQuery<InferRow<T>, References<T, T["$name"]>>["join"] = (target, options) =>
     this.query().join(target, options);
-  leftJoin: SelectQuery<InferRow<T>, References<T, T["$name"]>>["leftJoin"] = (
-    target,
-    options,
-  ) => this.query().leftJoin(target, options);
-  rightJoin: SelectQuery<InferRow<T>, References<T, T["$name"]>>["rightJoin"] = (
-    target,
-    options,
-  ) => this.query().rightJoin(target, options);
-  fullJoin: SelectQuery<InferRow<T>, References<T, T["$name"]>>["fullJoin"] = (
-    target,
-    options,
-  ) => this.query().fullJoin(target, options);
+  leftJoin: SelectQuery<InferRow<T>, References<T, T["$name"]>>["leftJoin"] = (target, options) =>
+    this.query().leftJoin(target, options);
+  rightJoin: SelectQuery<InferRow<T>, References<T, T["$name"]>>["rightJoin"] = (target, options) =>
+    this.query().rightJoin(target, options);
+  fullJoin: SelectQuery<InferRow<T>, References<T, T["$name"]>>["fullJoin"] = (target, options) =>
+    this.query().fullJoin(target, options);
   orderBy: SelectQuery<InferRow<T>, References<T, T["$name"]>>["orderBy"] = (
     expression,
     direction,
@@ -179,12 +161,21 @@ export class TableClient<T extends AnyTable> {
       text: `SELECT * FROM ${qualifiedTable(this.definition)} WHERE ${where.text} LIMIT 1`,
       values: where.values,
     };
-    const result = await execute(this.adapter, query, options, this.telemetry, `${this.definition.$name}.get`);
+    const result = await execute(
+      this.adapter,
+      query,
+      options,
+      this.telemetry,
+      `${this.definition.$name}.get`,
+    );
     const row = result.rows[0];
     return row ? decodeRow(this.definition, row) : null;
   }
 
-  async insert(input: InferInsert<T>, options?: ReturningStatus & QueryOptions): Promise<WriteResult>;
+  async insert(
+    input: InferInsert<T>,
+    options?: ReturningStatus & QueryOptions,
+  ): Promise<WriteResult>;
   async insert(input: InferInsert<T>, options: ReturningRows & QueryOptions): Promise<InferRow<T>>;
   async insert(
     input: InferInsert<T>,
@@ -207,7 +198,13 @@ export class TableClient<T extends AnyTable> {
         .join(", ")})${returning ? " RETURNING *" : ""}`,
       values,
     };
-    const result = await execute(this.adapter, query, options, this.telemetry, `${this.definition.$name}.insert`);
+    const result = await execute(
+      this.adapter,
+      query,
+      options,
+      this.telemetry,
+      `${this.definition.$name}.insert`,
+    );
     if (!returning) return { rowsAffected: result.rowCount };
     const row = result.rows[0];
     if (!row) throw new Error("INSERT RETURNING did not return a row.");
@@ -216,7 +213,8 @@ export class TableClient<T extends AnyTable> {
 
   async insertMany(
     inputs: readonly InferInsert<T>[],
-    options: (ReturningStatus | ReturningRows) & QueryOptions & { readonly chunkSize?: number } = {},
+    options: (ReturningStatus | ReturningRows) &
+      QueryOptions & { readonly chunkSize?: number } = {},
   ): Promise<WriteResult | readonly InferRow<T>[]> {
     if (inputs.length === 0) return options.returning === "row" ? [] : { rowsAffected: 0 };
     const chunkSize = options.chunkSize ?? 1000;
@@ -226,9 +224,7 @@ export class TableClient<T extends AnyTable> {
     for (let index = 0; index < inputs.length; index += chunkSize) {
       const chunk = inputs.slice(index, index + chunkSize);
       const properties = [
-        ...new Set(
-          chunk.flatMap((input) => Object.keys(input as Record<string, unknown>)),
-        ),
+        ...new Set(chunk.flatMap((input) => Object.keys(input as Record<string, unknown>))),
       ];
       if (properties.length === 0) throw new Error("insertMany rows require at least one value.");
       const columns = properties.map((property) => {
@@ -262,9 +258,7 @@ export class TableClient<T extends AnyTable> {
       );
       rowsAffected += result.rowCount;
       if (returning) {
-        rows.push(
-          ...result.rows.map((row) => decodeRow(this.definition, row)),
-        );
+        rows.push(...result.rows.map((row) => decodeRow(this.definition, row)));
       }
     }
     return options.returning === "row" ? rows : { rowsAffected };
@@ -303,16 +297,19 @@ export class TableClient<T extends AnyTable> {
       text: `UPDATE ${qualifiedTable(this.definition)} SET ${assignments.join(", ")} WHERE ${where.text}${returning ? " RETURNING *" : ""}`,
       values,
     };
-    const result = await execute(this.adapter, query, options, this.telemetry, `${this.definition.$name}.update`);
+    const result = await execute(
+      this.adapter,
+      query,
+      options,
+      this.telemetry,
+      `${this.definition.$name}.update`,
+    );
     if (!returning) return { rowsAffected: result.rowCount };
     const row = result.rows[0];
     return row ? decodeRow(this.definition, row) : null;
   }
 
-  async delete(
-    key: PrimaryKeyInput<T>,
-    options: QueryOptions = {},
-  ): Promise<WriteResult> {
+  async delete(key: PrimaryKeyInput<T>, options: QueryOptions = {}): Promise<WriteResult> {
     const where = whereKey(this.definition, key, 1);
     const result = await execute(
       this.adapter,
@@ -332,7 +329,9 @@ export class TableClient<T extends AnyTable> {
     options: QueryOptions & { readonly chunkSize?: number } = {},
   ): Promise<WriteResult> {
     if (inputs.length === 0) return { rowsAffected: 0 };
-    const primary = Object.entries(this.definition.$columns).filter(([, column]) => column.ast.primaryKey);
+    const primary = Object.entries(this.definition.$columns).filter(
+      ([, column]) => column.ast.primaryKey,
+    );
     if (primary.length === 0) throw new Error("upsertMany requires a primary key.");
     let rowsAffected = 0;
     const chunkSize = options.chunkSize ?? 1000;
@@ -357,15 +356,31 @@ export class TableClient<T extends AnyTable> {
           })
           .join(", ")})`;
       });
-      const updates = properties.filter((property) => !this.definition.$columns[property]!.ast.primaryKey);
+      const updates = properties.filter(
+        (property) => !this.definition.$columns[property]!.ast.primaryKey,
+      );
       const query = {
-        text: `INSERT INTO ${qualifiedTable(this.definition)} (${columns.map((column) => quoteIdentifier(column.ast.name)).join(", ")}) VALUES ${tuples.join(", ")} ON CONFLICT (${primary.map(([, column]) => quoteIdentifier(column.ast.name)).join(", ")}) DO ${updates.length === 0 ? "NOTHING" : `UPDATE SET ${updates.map((property) => {
-          const name = quoteIdentifier(this.definition.$columns[property]!.ast.name);
-          return `${name} = EXCLUDED.${name}`;
-        }).join(", ")}`}`,
+        text: `INSERT INTO ${qualifiedTable(this.definition)} (${columns.map((column) => quoteIdentifier(column.ast.name)).join(", ")}) VALUES ${tuples.join(", ")} ON CONFLICT (${primary.map(([, column]) => quoteIdentifier(column.ast.name)).join(", ")}) DO ${
+          updates.length === 0
+            ? "NOTHING"
+            : `UPDATE SET ${updates
+                .map((property) => {
+                  const name = quoteIdentifier(this.definition.$columns[property]!.ast.name);
+                  return `${name} = EXCLUDED.${name}`;
+                })
+                .join(", ")}`
+        }`,
         values,
       };
-      rowsAffected += (await execute(this.adapter, query, options, this.telemetry, `${this.definition.$name}.upsertMany`)).rowCount;
+      rowsAffected += (
+        await execute(
+          this.adapter,
+          query,
+          options,
+          this.telemetry,
+          `${this.definition.$name}.upsertMany`,
+        )
+      ).rowCount;
     }
     return { rowsAffected };
   }
@@ -375,9 +390,7 @@ export interface BatchOperation<T> {
   readonly execute: (adapter: DatabaseAdapter) => Promise<T>;
 }
 
-export type BatchItem<T, D> =
-  | BatchOperation<T>
-  | ((database: D) => Promise<T>);
+export type BatchItem<T, D> = BatchOperation<T> | ((database: D) => Promise<T>);
 
 export type BatchResults<T extends readonly unknown[]> = {
   readonly [K in keyof T]: T[K] extends BatchOperation<infer R>
@@ -421,10 +434,14 @@ export function createDatabaseClient<T extends Record<string, AnyTable>>(
       transaction: <R>(
         callback: (database: DatabaseClient<T>) => Promise<R>,
         transactionOptions?: TransactionOptions,
-      ) => currentAdapter.transaction((transactionAdapter) => callback(create(transactionAdapter)), transactionOptions),
-      batch: async <
-        const O extends readonly BatchItem<unknown, DatabaseClient<T>>[]
-      >(operations: O) => {
+      ) =>
+        currentAdapter.transaction(
+          (transactionAdapter) => callback(create(transactionAdapter)),
+          transactionOptions,
+        ),
+      batch: async <const O extends readonly BatchItem<unknown, DatabaseClient<T>>[]>(
+        operations: O,
+      ) => {
         const results: unknown[] = [];
         for (const operation of operations) {
           results.push(

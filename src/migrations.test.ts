@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type {
-  DatabaseAdapter,
-  ExecutionResult,
-  QueryOptions,
-  TransactionOptions,
-} from "./adapter";
+import type { DatabaseAdapter, ExecutionResult, QueryOptions, TransactionOptions } from "./adapter";
 import { createMigrationsApi, type AppliedMigration, type MigrationManifest } from "./migrations";
 import type { SqlQuery } from "./sql";
 

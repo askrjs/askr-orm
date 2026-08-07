@@ -39,9 +39,7 @@ void [row, input, patch, key];
 
 const joined = db.users
   .leftJoin(db.groups)
-  .on(({ users: userColumns, groups: groupColumns }) =>
-    eq(userColumns.groupId, groupColumns.id),
-  );
+  .on(({ users: userColumns, groups: groupColumns }) => eq(userColumns.groupId, groupColumns.id));
 
 // A joined query intentionally has no execute method until it has an explicit projection.
 // @ts-expect-error explicit projection is required after a join
@@ -51,9 +49,8 @@ const selected = joined.select(({ users: userColumns, groups: groupColumns }) =>
   email: userColumns.email,
   groupName: groupColumns.name,
 }));
-const result: Promise<
-  readonly Readonly<{ email: string; groupName: string | null }>[]
-> = selected.execute();
+const result: Promise<readonly Readonly<{ email: string; groupName: string | null }>[]> =
+  selected.execute();
 void result;
 
 // @ts-expect-error id is generated and email is required
