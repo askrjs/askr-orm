@@ -86,7 +86,7 @@ const manifest: MigrationManifest = {
 };
 
 describe("migrations", () => {
-  it("should plan and applies under a pinned advisory-locked session", async () => {
+  it("should plan and apply under a pinned advisory-locked session", async () => {
     const adapter = new MigrationAdapter();
     const events: string[] = [];
     const api = createMigrationsApi(adapter, manifest);

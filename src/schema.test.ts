@@ -36,7 +36,7 @@ const users = table("users", {
 });
 
 describe("schema definitions", () => {
-  it("should map property names and preserves relational metadata without connecting", () => {
+  it("should map property names and preserve relational metadata without connecting", () => {
     expect(users.groupId.ast.name).toBe("group_id");
     expect(users.createdAt.ast.default).toBe("CURRENT_TIMESTAMP");
     expect(users.groupId.ast.references?.()).toBe(groups.id);

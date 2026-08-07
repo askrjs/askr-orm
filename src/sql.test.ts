@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { and, compileKeyedSql, compileSql, eq, identifier, inArray, sql } from "./index";
 
 describe("SQL boundaries", () => {
-  it("should parameterize values and quotes generated identifiers", () => {
+  it("should parameterize values and quote generated identifiers", () => {
     const input = `x'); DROP TABLE users; --`;
     expect(
       compileSql(sql`SELECT * FROM ${identifier("user data")} WHERE email = ${input}`),
@@ -23,7 +23,7 @@ describe("SQL boundaries", () => {
     });
   });
 
-  it("should require static keyed SQL and reuses repeated named parameters", () => {
+  it("should require static keyed SQL and reuse repeated named parameters", () => {
     const query = sql.key("users.by-email", { email: "" })`
       SELECT id FROM users WHERE email = :email OR backup_email = :email
     `;

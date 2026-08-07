@@ -72,7 +72,7 @@ describe("database client", () => {
     expect(adapter.transactions).toBe(1);
   });
 
-  it("should require explicit join projection and compiles null-safe left joins", () => {
+  it("should require explicit join projection and compile null-safe left joins", () => {
     const adapter = new RecordingAdapter();
     const db = createDatabaseClient({ users, groups }, adapter);
     const query = db.users
