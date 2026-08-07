@@ -54,7 +54,7 @@ afterEach(async () => {
 });
 
 describe("schema migration generation", () => {
-  it("renders a deterministic first schema and no-op diff", () => {
+  it("should render a deterministic first schema and no-op diff", () => {
     expect(diffSnapshots(empty, usersSnapshot)).toBe(
       'CREATE TABLE "public"."users" (\n' +
         '  "email" text NOT NULL UNIQUE,\n' +
@@ -64,7 +64,7 @@ describe("schema migration generation", () => {
     expect(diffSnapshots(usersSnapshot, usersSnapshot)).toBe("");
   });
 
-  it("requires explicit intent for destructive and ambiguous changes", () => {
+  it("should require explicit intent for destructive and ambiguous changes", () => {
     expect(() => diffSnapshots(usersSnapshot, empty)).toThrow(/Dropping table users requires/);
     const changed: SchemaSnapshot = {
       ...usersSnapshot,
@@ -83,7 +83,7 @@ describe("schema migration generation", () => {
 });
 
 describe("database CLI", () => {
-  it("generates, byte-validates, and no-op regenerates a flat project", async () => {
+  it("should generate, byte-validate, and no-op regenerate a flat project", async () => {
     const packageRoot = path.resolve(import.meta.dirname, "..");
     const root = await fs.mkdtemp(path.join(packageRoot, ".orm-fixture-"));
     temporaryDirectories.push(root);
@@ -151,7 +151,7 @@ export const byEmail = sql.key("users.by-email", { email: "" })\`
     expect(generated).toContain('readonly "id": string;');
   });
 
-  it("prints help without loading a project", async () => {
+  it("should print help without loading a project", async () => {
     const logs: string[] = [];
     expect(
       await runDatabaseCli(["--help"], {

@@ -86,7 +86,7 @@ const manifest: MigrationManifest = {
 };
 
 describe("migrations", () => {
-  it("plans and applies under a pinned advisory-locked session", async () => {
+  it("should plan and applies under a pinned advisory-locked session", async () => {
     const adapter = new MigrationAdapter();
     const events: string[] = [];
     const api = createMigrationsApi(adapter, manifest);
@@ -108,7 +108,7 @@ describe("migrations", () => {
     ]);
   });
 
-  it("rejects checksum drift and failed history", async () => {
+  it("should reject checksum drift and failed history", async () => {
     const adapter = new MigrationAdapter();
     adapter.ledger.push({
       id: "01",
@@ -126,7 +126,7 @@ describe("migrations", () => {
     );
   });
 
-  it("fails closed for interrupted non-transactional migrations", async () => {
+  it("should fail closed for interrupted non-transactional migrations", async () => {
     const adapter = new MigrationAdapter();
     adapter.ledger.push({
       id: "01",

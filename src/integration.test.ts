@@ -105,7 +105,7 @@ integration("PostgreSQL adapter conformance", () => {
     await pool.end();
   });
 
-  it("covers CRUD, returning, bulk chunking, joins, and preparation", async () => {
+  it("should cover CRUD, returning, bulk chunking, joins, and preparation", async () => {
     const groupId = randomUUID();
     await db.groups.insert({ id: groupId, name: "Operators" });
     const inserted = await db.users.insert(
@@ -139,7 +139,7 @@ integration("PostgreSQL adapter conformance", () => {
     ]);
   });
 
-  it("keeps atomicity caller-owned", async () => {
+  it("should keep atomicity caller-owned", async () => {
     const groupId = randomUUID();
     await db.groups.insert({ id: groupId, name: "Rollback" });
     const email = `${randomUUID()}@example.com`;
@@ -157,7 +157,7 @@ integration("PostgreSQL adapter conformance", () => {
     ).toBeNull();
   });
 
-  it("applies bundled migrations with ledger and advisory-lock checks", async () => {
+  it("should apply bundled migrations with ledger and advisory-lock checks", async () => {
     await pool.query('DROP TABLE IF EXISTS "_askr_migrations", "orm_migration_probe"');
     const manifest: MigrationManifest = {
       migrations: [
