@@ -18,8 +18,12 @@ export interface WriteResult {
   readonly rowsAffected: number;
 }
 
+export interface ReturningRow {
+  readonly returning: "row";
+}
+
 export interface ReturningRows {
-  readonly returning: "row" | "rows";
+  readonly returning: "rows";
 }
 
 export interface ReturningStatus {
@@ -95,25 +99,34 @@ async function execute(
   operation: string,
 ): Promise<ExecutionResult<Record<string, unknown>>> {
   const started = performance.now();
+  let result: ExecutionResult<Record<string, unknown>>;
   try {
-    const result = await adapter.execute(query, options);
+    result = await adapter.execute(query, options);
+  } catch (error) {
+    const normalized = normalizeDatabaseError(error);
+    try {
+      telemetry?.onEvent({
+        operation,
+        durationMs: performance.now() - started,
+        error: normalized,
+        ...(telemetry.includeSql ? { sql: query.text } : {}),
+      });
+    } catch {
+      // Telemetry is observational and must never replace a database failure.
+    }
+    throw normalized;
+  }
+  try {
     telemetry?.onEvent({
       operation,
       durationMs: performance.now() - started,
       rowCount: result.rowCount,
       ...(telemetry.includeSql ? { sql: query.text } : {}),
     });
-    return result;
-  } catch (error) {
-    const normalized = normalizeDatabaseError(error);
-    telemetry?.onEvent({
-      operation,
-      durationMs: performance.now() - started,
-      error: normalized,
-      ...(telemetry.includeSql ? { sql: query.text } : {}),
-    });
-    throw normalized;
+  } catch {
+    // A telemetry sink cannot turn a committed operation into an application failure.
   }
+  return result;
 }
 
 export class TableClient<T extends AnyTable> {
@@ -147,6 +160,22 @@ export class TableClient<T extends AnyTable> {
     expression,
     direction,
   ) => this.query().orderBy(expression, direction);
+  groupBy: SelectQuery<InferRow<T>, References<T, T["$name"]>>["groupBy"] = (...groups) =>
+    this.query().groupBy(...groups);
+  having: SelectQuery<InferRow<T>, References<T, T["$name"]>>["having"] = (predicate) =>
+    this.query().having(predicate);
+  limit: SelectQuery<InferRow<T>, References<T, T["$name"]>>["limit"] = (value) =>
+    this.query().limit(value);
+  offset: SelectQuery<InferRow<T>, References<T, T["$name"]>>["offset"] = (value) =>
+    this.query().offset(value);
+  distinct: SelectQuery<InferRow<T>, References<T, T["$name"]>>["distinct"] = () =>
+    this.query().distinct();
+  with: SelectQuery<InferRow<T>, References<T, T["$name"]>>["with"] = (name, query) =>
+    this.query().with(name, query);
+  prepare: SelectQuery<InferRow<T>, References<T, T["$name"]>>["prepare"] = (name) =>
+    this.query().prepare(name);
+  stream: SelectQuery<InferRow<T>, References<T, T["$name"]>>["stream"] = (options) =>
+    this.query().stream(options);
 
   toSQL(): SqlQuery {
     return this.query().toSQL();
@@ -177,11 +206,18 @@ export class TableClient<T extends AnyTable> {
     input: InferInsert<T>,
     options?: ReturningStatus & QueryOptions,
   ): Promise<WriteResult>;
-  async insert(input: InferInsert<T>, options: ReturningRows & QueryOptions): Promise<InferRow<T>>;
+  async insert(input: InferInsert<T>, options: ReturningRow & QueryOptions): Promise<InferRow<T>>;
   async insert(
     input: InferInsert<T>,
-    options: (ReturningStatus | ReturningRows) & QueryOptions = {},
+    options: (ReturningStatus | ReturningRow) & QueryOptions = {},
   ): Promise<WriteResult | InferRow<T>> {
+    if (
+      options.returning !== undefined &&
+      options.returning !== "status" &&
+      options.returning !== "row"
+    ) {
+      throw new Error('insert returning must be "status" or "row".');
+    }
     const entries = Object.entries(input as Record<string, unknown>);
     if (entries.length === 0) throw new Error("insert requires at least one value.");
     const columns = entries.map(([property]) => {
@@ -217,7 +253,14 @@ export class TableClient<T extends AnyTable> {
     options: (ReturningStatus | ReturningRows) &
       QueryOptions & { readonly chunkSize?: number } = {},
   ): Promise<WriteResult | readonly InferRow<T>[]> {
-    if (inputs.length === 0) return options.returning === "row" ? [] : { rowsAffected: 0 };
+    if (
+      options.returning !== undefined &&
+      options.returning !== "status" &&
+      options.returning !== "rows"
+    ) {
+      throw new Error('insertMany returning must be "status" or "rows".');
+    }
+    if (inputs.length === 0) return options.returning === "rows" ? [] : { rowsAffected: 0 };
     const chunkSize = options.chunkSize ?? 1000;
     if (!Number.isSafeInteger(chunkSize) || chunkSize < 1) throw new Error("Invalid chunkSize.");
     let rowsAffected = 0;
@@ -244,7 +287,7 @@ export class TableClient<T extends AnyTable> {
           })
           .join(", ")})`;
       });
-      const returning = options.returning === "row";
+      const returning = options.returning === "rows";
       const result = await execute(
         this.adapter,
         {
@@ -262,7 +305,7 @@ export class TableClient<T extends AnyTable> {
         rows.push(...result.rows.map((row) => decodeRow(this.definition, row)));
       }
     }
-    return options.returning === "row" ? rows : { rowsAffected };
+    return options.returning === "rows" ? rows : { rowsAffected };
   }
 
   async update(
@@ -273,13 +316,20 @@ export class TableClient<T extends AnyTable> {
   async update(
     key: PrimaryKeyInput<T>,
     patch: InferPatch<T>,
-    options: ReturningRows & QueryOptions,
+    options: ReturningRow & QueryOptions,
   ): Promise<InferRow<T> | null>;
   async update(
     key: PrimaryKeyInput<T>,
     patch: InferPatch<T>,
-    options: (ReturningStatus | ReturningRows) & QueryOptions = {},
+    options: (ReturningStatus | ReturningRow) & QueryOptions = {},
   ): Promise<WriteResult | InferRow<T> | null> {
+    if (
+      options.returning !== undefined &&
+      options.returning !== "status" &&
+      options.returning !== "row"
+    ) {
+      throw new Error('update returning must be "status" or "row".');
+    }
     const entries = Object.entries(patch as Record<string, unknown>);
     if (entries.length === 0) throw new Error("update requires a non-empty patch.");
     const values = entries.map(([property, value]) => {
@@ -332,6 +382,13 @@ export class TableClient<T extends AnyTable> {
       readonly returning?: "status" | "rows";
     } = {},
   ): Promise<WriteResult | readonly InferRow<T>[]> {
+    if (
+      options.returning !== undefined &&
+      options.returning !== "status" &&
+      options.returning !== "rows"
+    ) {
+      throw new Error('upsertMany returning must be "status" or "rows".');
+    }
     if (inputs.length === 0) return options.returning === "rows" ? [] : { rowsAffected: 0 };
     const primary = Object.entries(this.definition.$columns).filter(
       ([, column]) => column.ast.primaryKey,
@@ -340,6 +397,7 @@ export class TableClient<T extends AnyTable> {
     let rowsAffected = 0;
     const returned: InferRow<T>[] = [];
     const chunkSize = options.chunkSize ?? 1000;
+    if (!Number.isSafeInteger(chunkSize) || chunkSize < 1) throw new Error("Invalid chunkSize.");
     for (let index = 0; index < inputs.length; index += chunkSize) {
       const chunk = inputs.slice(index, index + chunkSize);
       const properties = [
@@ -396,6 +454,13 @@ export class TableClient<T extends AnyTable> {
     input: InferInsert<T>,
     options: QueryOptions & { readonly returning?: "status" | "row" } = {},
   ): Promise<WriteResult | InferRow<T>> {
+    if (
+      options.returning !== undefined &&
+      options.returning !== "status" &&
+      options.returning !== "row"
+    ) {
+      throw new Error('upsert returning must be "status" or "row".');
+    }
     const result = await this.upsertMany([input], {
       ...options,
       returning: options.returning === "row" ? "rows" : "status",

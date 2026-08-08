@@ -5,9 +5,10 @@ import { createInterface } from "node:readline/promises";
 import { pathToFileURL } from "node:url";
 import { tsImport } from "tsx/esm/api";
 import type { DatabaseAdapter } from "./adapter";
-import type { DatabaseDefinition, DatabaseRegistry, DatabaseToolingAdapter } from "./definition";
+import type { DatabaseDefinition, DatabaseToolingAdapter } from "./definition";
 import type { BundledMigration, MigrationManifest } from "./migrations";
 import { quoteIdentifier } from "./naming";
+import { sqlStructure } from "./placeholders";
 import type {
   AnyTable,
   ColumnAst,
@@ -309,7 +310,7 @@ export function diffSnapshots(
     const existing = currentEnums.get(`${value.schema}.${value.name}`);
     if (!existing) {
       statements.push(
-        `CREATE TYPE ${qualified(value.schema, value.name)} AS ENUM (${value.values.map(sqlString).join(", ")});`,
+        `CREATE TYPE ${qualified(value.schema, value.name, dialect)} AS ENUM (${value.values.map(sqlString).join(", ")});`,
       );
       continue;
     }
@@ -321,7 +322,7 @@ export function diffSnapshots(
     }
     for (const added of value.values.slice(existing.values.length)) {
       statements.push(
-        `ALTER TYPE ${qualified(value.schema, value.name)} ADD VALUE ${sqlString(added)};`,
+        `ALTER TYPE ${qualified(value.schema, value.name, dialect)} ADD VALUE ${sqlString(added)};`,
       );
     }
   }
@@ -342,7 +343,7 @@ export function diffSnapshots(
       existing = currentTables.get(`${table.schema}.${table.renamedFrom}`);
       if (!existing) throw new Error(`renamedFrom table ${table.renamedFrom} does not exist.`);
       statements.push(
-        `ALTER TABLE ${qualified(table.schema, table.renamedFrom)} RENAME TO ${quoteIdentifier(table.name)};`,
+        `ALTER TABLE ${qualified(table.schema, table.renamedFrom, dialect)} RENAME TO ${quoteIdentifier(table.name)};`,
       );
     }
     if (!existing) {
@@ -361,7 +362,7 @@ export function diffSnapshots(
           );
         }
         statements.push(
-          `ALTER TABLE ${qualified(table.schema, table.name)} RENAME COLUMN ${quoteIdentifier(column.renamedFrom)} TO ${quoteIdentifier(column.name)};`,
+          `ALTER TABLE ${qualified(table.schema, table.name, dialect)} RENAME COLUMN ${quoteIdentifier(column.renamedFrom)} TO ${quoteIdentifier(column.name)};`,
         );
       }
       if (!old) {
@@ -376,13 +377,18 @@ export function diffSnapshots(
         continue;
       }
       if (old.dataType !== column.dataType) {
+        if (dialect === "sqlite") {
+          throw new Error(
+            `Changing ${table.name}.${column.name} requires a reviewed SQLite table rebuild or manual migration.`,
+          );
+        }
         if (!column.convertUsing) {
           throw new Error(
             `Changing ${table.name}.${column.name} from ${old.dataType} to ${column.dataType} requires convertUsing or a manual migration.`,
           );
         }
         statements.push(
-          `ALTER TABLE ${qualified(table.schema, table.name)} ALTER COLUMN ${quoteIdentifier(column.name)} TYPE ${column.dataType} USING ${column.convertUsing};`,
+          `ALTER TABLE ${qualified(table.schema, table.name, dialect)} ALTER COLUMN ${quoteIdentifier(column.name)} TYPE ${physicalType(column.dataType, dialect)} USING ${column.convertUsing};`,
         );
       }
       if (old.nullable && !column.nullable) {
@@ -391,8 +397,13 @@ export function diffSnapshots(
         );
       }
       if (!old.nullable && column.nullable) {
+        if (dialect === "sqlite") {
+          throw new Error(
+            `Changing ${table.name}.${column.name} nullability requires a reviewed SQLite table rebuild or manual migration.`,
+          );
+        }
         statements.push(
-          `ALTER TABLE ${qualified(table.schema, table.name)} ALTER COLUMN ${quoteIdentifier(column.name)} DROP NOT NULL;`,
+          `ALTER TABLE ${qualified(table.schema, table.name, dialect)} ALTER COLUMN ${quoteIdentifier(column.name)} DROP NOT NULL;`,
         );
       }
     }
@@ -425,10 +436,15 @@ export function diffSnapshots(
   for (const view of desired.views) {
     const old = currentViews.get(`${view.schema}.${view.name}`);
     if (!old)
-      statements.push(`CREATE VIEW ${qualified(view.schema, view.name)} AS\n${view.query};`);
-    else if (old.query !== view.query) {
       statements.push(
-        `CREATE OR REPLACE VIEW ${qualified(view.schema, view.name)} AS\n${view.query};`,
+        `CREATE VIEW ${qualified(view.schema, view.name, dialect)} AS\n${view.query};`,
+      );
+    else if (old.query !== view.query) {
+      if (dialect === "sqlite") {
+        throw new Error(`Changing view ${view.name} requires an explicit SQLite manual migration.`);
+      }
+      statements.push(
+        `CREATE OR REPLACE VIEW ${qualified(view.schema, view.name, dialect)} AS\n${view.query};`,
       );
     }
   }
@@ -537,37 +553,23 @@ async function loadDatabases(cwd: string): Promise<{
   const module = (await tsImport(path.join(location.databaseDir, "index.ts"), {
     parentURL: pathToFileURL(location.projectRoot).href,
   })) as Record<string, unknown>;
-  const exported = module.default ?? module.database ?? module.databases;
+  const exported = module.default ?? module.database;
   if (!exported || typeof exported !== "object") {
-    throw new Error("database/index.ts must default-export database(...) or databases(...).");
+    throw new Error("database/index.ts must export a defineDatabase(...) definition.");
   }
-  if ((exported as { kind?: string }).kind === "database") {
-    return {
-      projectRoot: location.projectRoot,
-      all: [
-        {
-          name: "default",
-          definition: exported as DatabaseDefinition<Record<string, AnyTable>>,
-          databaseDir: location.databaseDir,
-          projectRoot: location.projectRoot,
-        },
-      ],
-    };
-  }
-  if ((exported as { kind?: string }).kind !== "database-registry") {
+  if ((exported as { kind?: string }).kind !== "database") {
     throw new Error("Unsupported database root export.");
   }
-  const registry = exported as DatabaseRegistry<
-    Record<string, DatabaseDefinition<Record<string, AnyTable>>>
-  >;
   return {
     projectRoot: location.projectRoot,
-    all: Object.entries(registry.databases).map(([name, definition]) => ({
-      name,
-      definition,
-      databaseDir: path.join(location.databaseDir, name),
-      projectRoot: location.projectRoot,
-    })),
+    all: [
+      {
+        name: "default",
+        definition: exported as DatabaseDefinition<Record<string, AnyTable>>,
+        databaseDir: location.databaseDir,
+        projectRoot: location.projectRoot,
+      },
+    ],
   };
 }
 
@@ -752,7 +754,9 @@ async function generateOne(database: LoadedDatabase): Promise<string | null> {
     if (delta) {
       const id = ulid();
       const parent = replayed.manifest.migrations.at(-1)?.id ?? null;
-      const risk = /\b(?:DROP|ALTER\s+TABLE.+TYPE)\b/i.test(delta) ? "destructive" : "safe";
+      const risk = /\b(?:DROP|ALTER\s+TABLE\b[^;]*\bTYPE\b)/i.test(sqlStructure(delta))
+        ? "destructive"
+        : "safe";
       const content = migrationContents(id, parent, delta, true, risk);
       const directory = path.join(database.databaseDir, "migrations");
       await fs.mkdir(directory, { recursive: true });
@@ -834,6 +838,7 @@ function parseArgs(args: readonly string[], defaultCwd: string): ParsedArgs {
   let json = false;
   let cwd = defaultCwd;
   let nonTransactional = false;
+  let help = false;
   let resolution: "applied" | "rolled-back" = "applied";
   for (let index = 0; index < args.length; index += 1) {
     const value = args[index]!;
@@ -847,7 +852,7 @@ function parseArgs(args: readonly string[], defaultCwd: string): ParsedArgs {
     else if (value === "--non-transactional") nonTransactional = true;
     else if (value === "--applied") resolution = "applied";
     else if (value === "--rolled-back") resolution = "rolled-back";
-    else if (value === "--help" || value === "-h") command.push("help");
+    else if (value === "--help" || value === "-h") help = true;
     else if (value === "--cwd") {
       const next = args[++index];
       if (!next) throw new Error("--cwd requires a value.");
@@ -857,7 +862,7 @@ function parseArgs(args: readonly string[], defaultCwd: string): ParsedArgs {
     else command.push(value);
   }
   return {
-    command,
+    command: help ? ["help"] : command,
     ...(database === undefined ? {} : { database }),
     all,
     yes,

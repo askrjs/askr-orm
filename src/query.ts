@@ -1,6 +1,7 @@
 import type { DatabaseAdapter, QueryOptions } from "./adapter";
 import { normalizeDatabaseError } from "./errors";
 import { quoteIdentifier } from "./naming";
+import { rewritePlaceholders } from "./placeholders";
 import type { AnyTable, ColumnValue, InferRow } from "./schema";
 import {
   compileSql,
@@ -74,9 +75,7 @@ function expressionQuery(expression: Expression): SqlQuery {
 
 function appendQuery(target: { text: string; values: unknown[] }, query: SqlQuery): void {
   const offset = target.values.length;
-  target.text += query.text.replace(/\$(\d+)/g, (_match, index: string) => {
-    return `$${Number(index) + offset}`;
-  });
+  target.text += rewritePlaceholders(query.text, query.values, { offset }).text;
   target.values.push(...query.values);
 }
 

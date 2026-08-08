@@ -80,6 +80,43 @@ describe("schema migration generation", () => {
     };
     expect(() => diffSnapshots(usersSnapshot, changed)).toThrow(/requires convertUsing/);
   });
+
+  it("should render supported SQLite renames and reject PostgreSQL-only alterations", () => {
+    const renamed: SchemaSnapshot = {
+      ...usersSnapshot,
+      tables: [{ ...usersSnapshot.tables[0]!, name: "accounts", renamedFrom: "users" }],
+    };
+    expect(diffSnapshots(usersSnapshot, renamed, "sqlite")).toContain(
+      'ALTER TABLE "users" RENAME TO "accounts"',
+    );
+    const changedType: SchemaSnapshot = {
+      ...usersSnapshot,
+      tables: [
+        {
+          ...usersSnapshot.tables[0]!,
+          columns: usersSnapshot.tables[0]!.columns.map((column) =>
+            column.name === "email"
+              ? { ...column, dataType: "integer", convertUsing: "0" }
+              : column,
+          ),
+        },
+      ],
+    };
+    expect(() => diffSnapshots(usersSnapshot, changedType, "sqlite")).toThrow(
+      /SQLite table rebuild/,
+    );
+    const withView = (query: string): SchemaSnapshot => ({
+      ...usersSnapshot,
+      views: [{ kind: "view", schema: "public", name: "user_emails", query }],
+    });
+    expect(() =>
+      diffSnapshots(
+        withView("SELECT email FROM users"),
+        withView("SELECT id FROM users"),
+        "sqlite",
+      ),
+    ).toThrow(/SQLite manual migration/);
+  });
 });
 
 describe("database CLI", () => {
@@ -154,5 +191,11 @@ export default defineDatabase({
       }),
     ).toBe(0);
     expect(logs.join("\n")).toContain("askr database migration apply");
+    expect(
+      await runDatabaseCli(["migration", "status", "--help"], {
+        cwd: os.tmpdir(),
+        io: { log: (value = "") => logs.push(String(value)), error: () => undefined },
+      }),
+    ).toBe(0);
   });
 });

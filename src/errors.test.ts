@@ -15,4 +15,18 @@ describe("database errors", () => {
     expect(error.category).toBe(category);
     expect(error.cause).toBe(cause);
   });
+
+  it.each([
+    [
+      { code: "ERR_SQLITE_ERROR", errcode: 2067, message: "UNIQUE constraint failed" },
+      "constraint",
+    ],
+    [{ code: "ERR_SQLITE_ERROR", errcode: 5, message: "database is busy" }, "timeout"],
+    [
+      { code: "ERR_SQLITE_ERROR", errcode: 14, message: "unable to open database file" },
+      "connection",
+    ],
+  ] as const)("maps SQLite driver errors to %s", (cause, category) => {
+    expect(normalizeDatabaseError(cause).category).toBe(category);
+  });
 });

@@ -14,6 +14,7 @@ export {
   TableClient,
   type DatabaseClient,
   type ReturningRows,
+  type ReturningRow,
   type ReturningStatus,
   type WriteResult,
 } from "./client";

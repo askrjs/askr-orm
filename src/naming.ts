@@ -118,18 +118,3 @@ export function assertSafeIdentifier(value: string): void {
     throw new Error(`Unsafe or reserved unquoted SQL identifier: ${value}`);
   }
 }
-
-export function singularTypeName(value: string): string {
-  const singular = value.endsWith("ies")
-    ? `${value.slice(0, -3)}y`
-    : value.endsWith("ses")
-      ? value.slice(0, -2)
-      : value.endsWith("s")
-        ? value.slice(0, -1)
-        : value;
-  return singular
-    .split(/[_-]/)
-    .filter(Boolean)
-    .map((part) => `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`)
-    .join("");
-}

@@ -36,6 +36,7 @@ describe("SQLite dialect", () => {
     }
     expect(rows).toEqual([{ name: "Grace" }]);
     await adapter.close?.();
+    await adapter.close?.();
   });
 
   it("should register explicit keyed SQL and reject PostgreSQL-only columns before open", async () => {

@@ -1,87 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { Pool, type PoolClient, type QueryResult } from "pg";
+import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { DatabaseAdapter, ExecutionResult, QueryOptions, TransactionOptions } from "./adapter";
-import { createDatabaseClient, eq, table, text, uuid } from "./index";
-import { timestampTz } from "./postgres";
+import type { DatabaseAdapter } from "./adapter";
+import { createDatabaseClient, eq, table, text, uuid, type DatabaseClient } from "./index";
+import { postgres, timestampTz } from "./postgres";
 import { createMigrationsApi, type MigrationManifest } from "./migrations";
-import type { SqlQuery } from "./sql";
 
 const databaseUrl = process.env.ASKR_ORM_TEST_DATABASE_URL;
 const integration = databaseUrl ? describe : describe.skip;
-
-class PgAdapter implements DatabaseAdapter {
-  readonly identity = databaseUrl ?? "integration-disabled";
-
-  constructor(
-    private readonly pool: Pool,
-    private readonly client?: PoolClient,
-    private readonly ownsPool = false,
-  ) {}
-
-  async execute<Row = Record<string, unknown>>(
-    query: SqlQuery,
-    options: QueryOptions = {},
-  ): Promise<ExecutionResult<Row>> {
-    const executor = this.client ?? this.pool;
-    const result = (await executor.query({
-      text: query.text,
-      values: [...query.values],
-      ...(options.preparedName === undefined ? {} : { name: options.preparedName }),
-      ...(options.signal === undefined ? {} : { signal: options.signal }),
-      ...(options.timeoutMs === undefined ? {} : { query_timeout: options.timeoutMs }),
-    } as never)) as unknown as QueryResult;
-    return { rows: result.rows as Row[], rowCount: result.rowCount ?? 0 };
-  }
-
-  async transaction<T>(
-    callback: (adapter: DatabaseAdapter) => Promise<T>,
-    options: TransactionOptions = {},
-  ): Promise<T> {
-    const client = this.client ?? (await this.pool.connect());
-    const release = this.client ? undefined : () => client.release();
-    try {
-      const isolation = options.isolation
-        ? ` ISOLATION LEVEL ${options.isolation.toUpperCase()}`
-        : "";
-      const readOnly = options.readOnly ? " READ ONLY" : "";
-      await client.query(`BEGIN${isolation}${readOnly}`);
-      const result = await callback(new PgAdapter(this.pool, client));
-      await client.query("COMMIT");
-      return result;
-    } catch (error) {
-      await client.query("ROLLBACK");
-      throw error;
-    } finally {
-      release?.();
-    }
-  }
-
-  async session<T>(callback: (adapter: DatabaseAdapter) => Promise<T>): Promise<T> {
-    if (this.client) return callback(this);
-    const client = await this.pool.connect();
-    try {
-      return await callback(new PgAdapter(this.pool, client));
-    } finally {
-      client.release();
-    }
-  }
-
-  async migrationLock<T>(callback: (adapter: DatabaseAdapter) => Promise<T>): Promise<T> {
-    return this.session(async (session) => {
-      await session.execute({ text: "SELECT pg_advisory_lock(4707438161740729)", values: [] });
-      try {
-        return await callback(session);
-      } finally {
-        await session.execute({ text: "SELECT pg_advisory_unlock(4707438161740729)", values: [] });
-      }
-    });
-  }
-
-  async close(): Promise<void> {
-    if (this.ownsPool) await this.pool.end();
-  }
-}
 
 const groups = table("orm_groups", {
   id: uuid().primaryKey(),
@@ -98,10 +24,12 @@ const users = table("orm_users", {
 
 integration("PostgreSQL adapter conformance", () => {
   const pool = new Pool({ connectionString: databaseUrl, max: 4 });
-  const adapter = new PgAdapter(pool);
-  const db = createDatabaseClient({ users, groups }, adapter);
+  let adapter: DatabaseAdapter;
+  let db: DatabaseClient<{ users: typeof users; groups: typeof groups }>;
 
   beforeAll(async () => {
+    adapter = await postgres({ url: databaseUrl!, shadowUrl: `${databaseUrl!}_shadow` }).open();
+    db = createDatabaseClient({ users, groups }, adapter);
     await pool.query('CREATE EXTENSION IF NOT EXISTS "pgcrypto"');
     await pool.query('DROP TABLE IF EXISTS "orm_users", "orm_groups" CASCADE');
     await pool.query('CREATE TABLE "orm_groups" ("id" uuid PRIMARY KEY, "name" text NOT NULL)');
@@ -115,6 +43,7 @@ integration("PostgreSQL adapter conformance", () => {
       'DROP TABLE IF EXISTS "_askr_migrations", "orm_migration_probe", "orm_users", "orm_groups" CASCADE',
     );
     await pool.end();
+    await adapter.close?.();
   });
 
   it("should cover CRUD, returning, bulk chunking, joins, and preparation", async () => {
@@ -132,7 +61,7 @@ integration("PostgreSQL adapter conformance", () => {
         { email: `${randomUUID()}@example.com`, groupId },
         { email: `${randomUUID()}@example.com`, groupId },
       ],
-      { returning: "row", chunkSize: 2 },
+      { returning: "rows", chunkSize: 2 },
     );
     expect(bulk).toHaveLength(2);
 
@@ -167,6 +96,34 @@ integration("PostgreSQL adapter conformance", () => {
     expect(
       await db.users.where(({ orm_users: columns }) => eq(columns.email, email)).first(),
     ).toBeNull();
+  });
+
+  it("should isolate nested savepoints and cancel cursor streams", async () => {
+    const groupId = randomUUID();
+    await db.groups.insert({ id: groupId, name: "Savepoints" });
+    const rolledBackEmail = `${randomUUID()}@example.com`;
+    const committedEmail = `${randomUUID()}@example.com`;
+    await db.transaction(async (transaction) => {
+      await expect(
+        transaction.transaction(async (nested) => {
+          await nested.users.insert({ email: rolledBackEmail, groupId });
+          throw new Error("nested rollback");
+        }),
+      ).rejects.toThrow("nested rollback");
+      await transaction.users.insert({ email: committedEmail, groupId });
+    });
+    expect(
+      await db.users.where(({ orm_users: columns }) => eq(columns.email, rolledBackEmail)).first(),
+    ).toBeNull();
+    expect(
+      await db.users.where(({ orm_users: columns }) => eq(columns.email, committedEmail)).first(),
+    ).not.toBeNull();
+
+    const controller = new AbortController();
+    const iterator = db.users.stream({ signal: controller.signal })[Symbol.asyncIterator]();
+    await expect(iterator.next()).resolves.toMatchObject({ done: false });
+    controller.abort(new Error("stop stream"));
+    await expect(iterator.next()).rejects.toThrow();
   });
 
   it("should apply bundled migrations with ledger and advisory-lock checks", async () => {

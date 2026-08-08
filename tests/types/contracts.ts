@@ -56,3 +56,7 @@ void result;
 // @ts-expect-error id is generated and email is required
 const invalidInsert: InferInsert<typeof users> = { groupId: "group" };
 void invalidInsert;
+
+// @ts-expect-error primary keys are not mutable through patch payloads
+const invalidPatch: InferPatch<typeof users> = { id: "replacement" };
+void invalidPatch;

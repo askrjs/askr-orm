@@ -189,7 +189,14 @@ export type InferInsert<T extends AnyTable> = Readonly<
 >;
 export type InferPatch<T extends AnyTable> = Readonly<
   Partial<{
-    [K in keyof T["$columns"]]: ColumnValue<T["$columns"][K]>;
+    [K in keyof T["$columns"] as T["$columns"][K] extends ColumnBuilder<
+      unknown,
+      boolean,
+      boolean,
+      true
+    >
+      ? never
+      : K]: ColumnValue<T["$columns"][K]>;
   }>
 >;
 export type InferKey<T extends AnyTable> = Readonly<{

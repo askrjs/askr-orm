@@ -42,6 +42,8 @@ interface DriverErrorLike {
   readonly table?: unknown;
   readonly column?: unknown;
   readonly name?: unknown;
+  readonly errcode?: unknown;
+  readonly errstr?: unknown;
 }
 
 const CONSTRAINT_CODES = new Set(["23000", "23502", "23503", "23505", "23514", "23P01"]);
@@ -52,6 +54,8 @@ export function normalizeDatabaseError(error: unknown): DatabaseError {
   const value = (error && typeof error === "object" ? error : {}) as DriverErrorLike;
   const code = typeof value.code === "string" ? value.code : undefined;
   const message = typeof value.message === "string" ? value.message : "Database operation failed.";
+  const sqliteCode = typeof value.errcode === "number" ? value.errcode : undefined;
+  const sqlitePrimary = sqliteCode === undefined ? undefined : sqliteCode & 0xff;
   let category: DatabaseErrorCategory = "unknown";
   if (code && CONSTRAINT_CODES.has(code)) category = "constraint";
   else if (code === "40001") category = "serialization";
@@ -59,6 +63,20 @@ export function normalizeDatabaseError(error: unknown): DatabaseError {
   else if (code === "57014" || value.name === "AbortError") category = "cancellation";
   else if (code === "55P03" || code === "57000") category = "timeout";
   else if (code && CONNECTION_PREFIXES.some((prefix) => code.startsWith(prefix))) {
+    category = "connection";
+  } else if (
+    sqlitePrimary === 19 ||
+    (code === "ERR_SQLITE_ERROR" &&
+      /\b(?:constraint|unique|not null|foreign key|check)\b/i.test(message))
+  ) {
+    category = "constraint";
+  } else if (
+    sqlitePrimary === 5 ||
+    sqlitePrimary === 6 ||
+    /database is (?:busy|locked)/i.test(message)
+  ) {
+    category = "timeout";
+  } else if (sqlitePrimary !== undefined && [8, 10, 11, 14, 26].includes(sqlitePrimary)) {
     category = "connection";
   }
   return new DatabaseError(message, {

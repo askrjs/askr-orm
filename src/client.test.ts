@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DatabaseAdapter, ExecutionResult, QueryOptions, TransactionOptions } from "./adapter";
-import { createDatabaseClient, eq, table, text, uuid } from "./index";
+import { columnRef, createDatabaseClient, eq, table, text, uuid } from "./index";
 import type { SqlQuery } from "./sql";
 
 class RecordingAdapter implements DatabaseAdapter {
@@ -55,6 +55,7 @@ describe("database client", () => {
 
   it("should not create implicit transactions for bulk writes", async () => {
     const adapter = new RecordingAdapter();
+    adapter.rows = [{ id: "u", email: "a@example.com", group_id: "g" }];
     const db = createDatabaseClient({ users }, adapter);
     await db.users.insertMany([
       { email: "one@example.com", groupId: "g" },
@@ -91,5 +92,58 @@ describe("database client", () => {
     const db = createDatabaseClient({ users }, new RecordingAdapter());
     expect(() => db.users.join(db.users)).toThrow(/self-joins require an explicit alias/);
     expect(() => db.users.join(db.users, { as: "otherUsers" })).not.toThrow();
+  });
+
+  it("should keep telemetry observational and validate bulk options", async () => {
+    const adapter = new RecordingAdapter();
+    const db = createDatabaseClient({ users }, adapter, undefined, {
+      telemetry: {
+        onEvent: () => {
+          throw new Error("sink failed");
+        },
+      },
+    });
+    await expect(db.users.insert({ email: "a@example.com", groupId: "g" })).resolves.toEqual({
+      rowsAffected: 1,
+    });
+    await expect(
+      db.users.upsertMany([{ email: "a@example.com", groupId: "g" }], { chunkSize: 0 }),
+    ).rejects.toThrow("Invalid chunkSize");
+    await expect(db.users.insertMany([], { returning: "row" } as never)).rejects.toThrow(
+      /returning/,
+    );
+  });
+
+  it("should expose the complete immutable read surface from a table", async () => {
+    const adapter = new RecordingAdapter();
+    adapter.rows = [{ id: "u", email: "a@example.com", group_id: "g" }];
+    const db = createDatabaseClient({ users }, adapter);
+    const query = db.users
+      .distinct()
+      .groupBy(({ users: columns }) => columns.email)
+      .having(eq(columnRef("users", "email"), "a@example.com"))
+      .orderBy(({ users: columns }) => columns.email)
+      .limit(5)
+      .offset(2);
+    expect(query.toSQL().text).toContain("GROUP BY");
+    expect(db.users.prepare("all-users").name).toBe("all-users");
+    await expect(db.users.limit(1).execute()).resolves.toHaveLength(1);
+  });
+
+  it("should cover update, delete, upsert, and composite keys", async () => {
+    const memberships = table("memberships", {
+      userId: uuid().primaryKey(),
+      groupId: uuid().primaryKey(),
+      role: text().notNull(),
+    });
+    const adapter = new RecordingAdapter();
+    const db = createDatabaseClient({ memberships }, adapter);
+    await db.memberships.update({ userId: "u", groupId: "g" }, { role: "admin" });
+    await db.memberships.delete({ userId: "u", groupId: "g" });
+    await db.memberships.upsert({ userId: "u", groupId: "g", role: "admin" });
+    expect(adapter.queries.map((query) => query.text).join("\n")).toContain(
+      '"user_id" = $2 AND "group_id" = $3',
+    );
+    await expect(db.memberships.get("u" as never)).rejects.toThrow(/composite primary key/);
   });
 });

@@ -1,7 +1,21 @@
 import { describe, expect, it } from "vitest";
 import { and, compileKeyedSql, compileSql, eq, identifier, inArray, sql } from "./index";
+import { rewritePlaceholders, sqlStructure } from "./placeholders";
 
 describe("SQL boundaries", () => {
+  it("should rewrite only structural placeholders", () => {
+    const source = `SELECT '$1', '"public".' FROM "public"."items" WHERE id = $1 -- $2\nAND note = $$ $3 $$`;
+    expect(rewritePlaceholders(source, [7], { sqlite: true })).toEqual({
+      text: `SELECT '$1', '"public".' FROM "items" WHERE id = ? -- $2\nAND note = $$ $3 $$`,
+      values: [7],
+    });
+  });
+
+  it("should mask non-structural SQL for migration classification", () => {
+    expect(sqlStructure(`ALTER TABLE users ADD COLUMN "type" text DEFAULT 'DROP'`)).toBe(
+      "ALTER TABLE users ADD COLUMN        text DEFAULT       ",
+    );
+  });
   it("should parameterize values and quote generated identifiers", () => {
     const input = `x'); DROP TABLE users; --`;
     expect(

@@ -26,11 +26,13 @@ function lazy(value: string | (() => string) | undefined, environment: string): 
 
 class PgAdapter implements DatabaseAdapter {
   readonly identity: string;
+  private closed = false;
   constructor(
     private readonly executor: { query(config: unknown): Promise<QueryResult> },
     identity: string,
     private readonly pool?: PoolType,
     private readonly client?: PoolClient,
+    private readonly transactionDepth = 0,
   ) {
     this.identity = identity;
   }
@@ -53,10 +55,13 @@ class PgAdapter implements DatabaseAdapter {
     const client = this.client ?? owned;
     if (!client) throw new Error("PostgreSQL streaming requires a pinned client.");
     try {
+      if (options.signal?.aborted) throw options.signal.reason;
       const { default: QueryStream } = await import("pg-query-stream");
+      if (options.signal?.aborted) throw options.signal.reason;
       const stream = client.query(new QueryStream(query.text, [...query.values]));
       const abort = () => stream.destroy(options.signal?.reason);
       options.signal?.addEventListener("abort", abort, { once: true });
+      if (options.signal?.aborted) abort();
       try {
         for await (const row of stream) yield row as Row;
       } finally {
@@ -72,20 +77,30 @@ class PgAdapter implements DatabaseAdapter {
     callback: (adapter: DatabaseAdapter) => Promise<T>,
     options: TransactionOptions = {},
   ): Promise<T> {
-    if (this.client) {
+    if (this.client && this.transactionDepth > 0) {
       const savepoint = `askr_${Math.random().toString(36).slice(2)}`;
       await this.client.query(`SAVEPOINT ${savepoint}`);
       try {
-        const value = await callback(this);
+        const value = await callback(
+          new PgAdapter(
+            this.client as never,
+            this.identity,
+            undefined,
+            this.client,
+            this.transactionDepth + 1,
+          ),
+        );
         await this.client.query(`RELEASE SAVEPOINT ${savepoint}`);
         return value;
       } catch (error) {
         await this.client.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+        await this.client.query(`RELEASE SAVEPOINT ${savepoint}`);
         throw error;
       }
     }
-    if (!this.pool) throw new Error("PostgreSQL transactions require a pool.");
-    const client = await this.pool.connect();
+    if (!this.client && !this.pool) throw new Error("PostgreSQL transactions require a pool.");
+    const owned = this.client ? undefined : await this.pool!.connect();
+    const client = this.client ?? owned!;
     try {
       const clauses = [
         options.isolation && `ISOLATION LEVEL ${options.isolation.toUpperCase()}`,
@@ -95,7 +110,7 @@ class PgAdapter implements DatabaseAdapter {
         .join(" ");
       await client.query(`BEGIN${clauses ? ` ${clauses}` : ""}`);
       const value = await callback(
-        new PgAdapter(client as never, this.identity, undefined, client),
+        new PgAdapter(client as never, this.identity, undefined, client, 1),
       );
       await client.query("COMMIT");
       return value;
@@ -103,7 +118,7 @@ class PgAdapter implements DatabaseAdapter {
       await client.query("ROLLBACK");
       throw error;
     } finally {
-      client.release();
+      owned?.release();
     }
   }
 
@@ -132,6 +147,8 @@ class PgAdapter implements DatabaseAdapter {
   }
 
   async close(): Promise<void> {
+    if (this.closed) return;
+    this.closed = true;
     await this.pool?.end();
   }
 }
@@ -176,12 +193,15 @@ async function pgTooling(
         .rows;
     },
     async describe(sql, parameterNames) {
-      await pool.query("BEGIN");
+      const client = await pool.connect();
+      let prepared = false;
       try {
-        await pool.query(`PREPARE askr_describe AS ${sql}`);
+        await client.query(`PREPARE askr_describe AS ${sql}`);
+        prepared = true;
         return { parameters: [...parameterNames], columns: [] };
       } finally {
-        await pool.query("ROLLBACK");
+        if (prepared) await client.query("DEALLOCATE askr_describe");
+        client.release();
       }
     },
     async close() {

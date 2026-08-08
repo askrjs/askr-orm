@@ -10,19 +10,7 @@ import type {
 } from "./adapter";
 import type { DatabaseToolingAdapter } from "./definition";
 import type { SqlQuery } from "./sql";
-import type { AnyColumn } from "./schema";
-
-export interface SqliteConflictClause {
-  readonly kind: "sqlite-conflict";
-  readonly action: "rollback" | "abort" | "fail" | "ignore" | "replace";
-}
-
-export const conflict = (action: SqliteConflictClause["action"]): SqliteConflictClause => ({
-  kind: "sqlite-conflict",
-  action,
-});
-
-export const rowid = (column: AnyColumn): AnyColumn => column;
+import { rewritePlaceholders, sqliteSql } from "./placeholders";
 
 export interface SqliteOptions {
   readonly filename?: string | (() => string);
@@ -34,14 +22,7 @@ interface QueueContext {
 const context = new AsyncLocalStorage<QueueContext>();
 
 function sqliteQuery(query: SqlQuery): SqlQuery {
-  const values: unknown[] = [];
-  const text = query.text
-    .replaceAll('"public".', "")
-    .replace(/\$(\d+)/g, (_match, index: string) => {
-      values.push(query.values[Number(index) - 1]);
-      return "?";
-    });
-  return { text, values };
+  return rewritePlaceholders(query.text, query.values, { sqlite: true });
 }
 
 class SqliteQueue {
@@ -170,6 +151,7 @@ class SqliteAdapter implements DatabaseAdapter {
 
   async close(): Promise<void> {
     await this.queue.run(async () => {
+      if (this.closed) return;
       this.closed = true;
       this.database.close();
     });
@@ -178,14 +160,16 @@ class SqliteAdapter implements DatabaseAdapter {
 
 function tooling(filename: string): DatabaseToolingAdapter {
   let database = new DatabaseSync(filename);
+  let closed = false;
   return {
     identity: filename,
     async reset() {
-      database.close();
+      if (!closed) database.close();
       database = new DatabaseSync(filename);
+      closed = false;
     },
     async execute(sql) {
-      database.exec(sql.replaceAll('"public".', ""));
+      database.exec(sqliteSql(sql));
     },
     async introspect() {
       const objects = database
@@ -245,19 +229,21 @@ function tooling(filename: string): DatabaseToolingAdapter {
       return { version: 1, enums: [], tables, views };
     },
     async describe(sql, parameterNames) {
-      const statement = database.prepare(sql.replaceAll('"public".', "").replace(/\$\d+/g, "?"));
+      const statement = database.prepare(
+        rewritePlaceholders(sql, parameterNames, { sqlite: true }).text,
+      );
       return {
         parameters: [...parameterNames],
-        columns: statement
-          .columns()
-          .map((column) => ({
-            name: column.name,
-            dataType: column.type ?? "unknown",
-            nullable: true,
-          })),
+        columns: statement.columns().map((column) => ({
+          name: column.name,
+          dataType: column.type ?? "unknown",
+          nullable: true,
+        })),
       };
     },
     async close() {
+      if (closed) return;
+      closed = true;
       database.close();
     },
   };
