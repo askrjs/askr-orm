@@ -99,34 +99,31 @@ export const users = table("users", {
     );
     await fs.writeFile(
       path.join(root, "database", "index.ts"),
-      `import { database } from "../../src/index.ts";
+      `import { defineDatabase, defineQuery } from "../../src/index.ts";
 import { users } from "./users.ts";
+const byEmail = defineQuery<{ email: string }>("users.by-email")\`SELECT id FROM users WHERE email = \${"email"}\`;
 let migrated = false;
 const snapshot = ${JSON.stringify(usersSnapshot)};
-export default database({
-  tables: { users },
-  targetIdentity: "target",
-  scratchIdentity: "scratch",
-  target: async () => { throw new Error("generate must not open target"); },
-  scratch: async () => ({
-    identity: "scratch",
-    reset: async () => { migrated = false; },
-    execute: async () => { migrated = true; },
-    introspect: async () => migrated ? snapshot : ${JSON.stringify(empty)},
-    describe: async () => ({
-      parameters: ["email"],
-      columns: [{ name: "id", dataType: "uuid", nullable: false }],
+export default defineDatabase({
+  driver: {
+    dialect: "postgres",
+    targetIdentity: "target",
+    shadowIdentity: "scratch",
+    open: async () => { throw new Error("generate must not open target"); },
+    shadow: async () => ({
+      identity: "scratch",
+      reset: async () => { migrated = false; },
+      execute: async () => { migrated = true; },
+      introspect: async () => migrated ? snapshot : ${JSON.stringify(empty)},
+      describe: async () => ({
+        parameters: ["email"],
+        columns: [{ name: "id", dataType: "uuid", nullable: false }],
+      }),
     }),
-  }),
+  },
+  tables: { users },
+  queries: { byEmail },
 });
-`,
-    );
-    await fs.writeFile(
-      path.join(root, "queries.ts"),
-      `import { sql } from "../src/index.ts";
-export const byEmail = sql.key("users.by-email", { email: "" })\`
-  SELECT id FROM users WHERE email = :email
-\`;
 `,
     );
     const logs: string[] = [];
@@ -144,7 +141,7 @@ export const byEmail = sql.key("users.by-email", { email: "" })\`
     expect(logs.at(-1)).toBe("default: unchanged");
 
     const generated = await fs.readFile(
-      path.join(root, "database", "generated", "queries.ts"),
+      path.join(root, "database", "generated.ts"),
       "utf8",
     );
     expect(generated).toContain('"users.by-email"');

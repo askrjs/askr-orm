@@ -12,13 +12,14 @@ import { quoteIdentifier } from "./naming";
 import { tableQuery, type References, type SelectQuery } from "./query";
 import type { SqlQuery } from "./sql";
 import { createMigrationsApi, type MigrationManifest, type MigrationsApi } from "./migrations";
+import type { RegisteredQuery } from "./registered-query";
 
 export interface WriteResult {
   readonly rowsAffected: number;
 }
 
 export interface ReturningRows {
-  readonly returning: "row";
+  readonly returning: "row" | "rows";
 }
 
 export interface ReturningStatus {
@@ -326,14 +327,15 @@ export class TableClient<T extends AnyTable> {
 
   async upsertMany(
     inputs: readonly InferInsert<T>[],
-    options: QueryOptions & { readonly chunkSize?: number } = {},
-  ): Promise<WriteResult> {
-    if (inputs.length === 0) return { rowsAffected: 0 };
+    options: QueryOptions & { readonly chunkSize?: number; readonly returning?: "status" | "rows" } = {},
+  ): Promise<WriteResult | readonly InferRow<T>[]> {
+    if (inputs.length === 0) return options.returning === "rows" ? [] : { rowsAffected: 0 };
     const primary = Object.entries(this.definition.$columns).filter(
       ([, column]) => column.ast.primaryKey,
     );
     if (primary.length === 0) throw new Error("upsertMany requires a primary key.");
     let rowsAffected = 0;
+    const returned: InferRow<T>[] = [];
     const chunkSize = options.chunkSize ?? 1000;
     for (let index = 0; index < inputs.length; index += chunkSize) {
       const chunk = inputs.slice(index, index + chunkSize);
@@ -369,90 +371,123 @@ export class TableClient<T extends AnyTable> {
                   return `${name} = EXCLUDED.${name}`;
                 })
                 .join(", ")}`
-        }`,
+        }${options.returning === "rows" ? " RETURNING *" : ""}`,
         values,
       };
-      rowsAffected += (
-        await execute(
+      const result = await execute(
           this.adapter,
           query,
           options,
           this.telemetry,
           `${this.definition.$name}.upsertMany`,
-        )
-      ).rowCount;
+        );
+      rowsAffected += result.rowCount;
+      if (options.returning === "rows") {
+        returned.push(...result.rows.map((row) => decodeRow(this.definition, row)));
+      }
     }
-    return { rowsAffected };
+    return options.returning === "rows" ? returned : { rowsAffected };
+  }
+
+  async upsert(
+    input: InferInsert<T>,
+    options: QueryOptions & { readonly returning?: "status" | "row" } = {},
+  ): Promise<WriteResult | InferRow<T>> {
+    const result = await this.upsertMany([input], {
+      ...options,
+      returning: options.returning === "row" ? "rows" : "status",
+    });
+    if (options.returning !== "row") return result as WriteResult;
+    const row = (result as readonly InferRow<T>[])[0];
+    if (!row) throw new Error("UPSERT RETURNING did not return a row.");
+    return row;
   }
 }
-
-export interface BatchOperation<T> {
-  readonly execute: (adapter: DatabaseAdapter) => Promise<T>;
-}
-
-export type BatchItem<T, D> = BatchOperation<T> | ((database: D) => Promise<T>);
-
-export type BatchResults<T extends readonly unknown[]> = {
-  readonly [K in keyof T]: T[K] extends BatchOperation<infer R>
-    ? Awaited<R>
-    : T[K] extends (...args: never[]) => Promise<infer R>
-      ? Awaited<R>
-      : never;
-};
 
 export type DatabaseTables<T extends Record<string, AnyTable>> = {
   readonly [K in keyof T]: TableClient<T[K]>;
 };
 
-export type DatabaseClient<T extends Record<string, AnyTable>> = DatabaseTables<T> & {
+type QueryFunctions<Q extends Record<string, RegisteredQuery<Record<string, unknown>>>> = {
+  readonly [K in keyof Q]: Q[K] extends RegisteredQuery<infer P, infer Row>
+    ? (params: P, options?: QueryOptions) => Promise<readonly Row[]>
+    : never;
+};
+
+export type DatabaseClient<
+  T extends Record<string, AnyTable>,
+  Q extends Record<string, RegisteredQuery<Record<string, unknown>>> = Record<never, never>,
+> = DatabaseTables<T> & {
+  readonly queries: QueryFunctions<Q>;
   readonly migrations: MigrationsApi;
   transaction<R>(
-    callback: (database: DatabaseClient<T>) => Promise<R>,
+    callback: (database: DatabaseClient<T, Q>) => Promise<R>,
     options?: TransactionOptions,
   ): Promise<R>;
-  batch<const O extends readonly BatchItem<unknown, DatabaseClient<T>>[]>(
-    operations: O,
-  ): Promise<BatchResults<O>>;
   close(): Promise<void>;
 };
 
-export function createDatabaseClient<T extends Record<string, AnyTable>>(
+export function createDatabaseClient<
+  T extends Record<string, AnyTable>,
+  Q extends Record<string, RegisteredQuery<Record<string, unknown>>> = Record<never, never>,
+>(
   tables: T,
   adapter: DatabaseAdapter,
   manifest: MigrationManifest = { migrations: [] },
   options: DatabaseOpenOptions = {},
-): DatabaseClient<T> {
-  const create = (currentAdapter: DatabaseAdapter): DatabaseClient<T> => {
+  registeredQueries: Q = {} as Q,
+): DatabaseClient<T, Q> {
+  const create = (currentAdapter: DatabaseAdapter, expires?: { active: boolean }): DatabaseClient<T, Q> => {
+    const assertActive = () => {
+      if (expires && !expires.active) throw new Error("Transaction client is no longer active.");
+    };
+    const effectiveAdapter: DatabaseAdapter = expires
+      ? {
+          execute(query, queryOptions) { assertActive(); return currentAdapter.execute(query, queryOptions); },
+          stream(query, queryOptions) {
+            assertActive();
+            if (!currentAdapter.stream) throw new Error("Streaming is not supported by this adapter.");
+            return currentAdapter.stream(query, queryOptions);
+          },
+          transaction(callback, transactionOptions) {
+            assertActive();
+            return currentAdapter.transaction(callback, transactionOptions);
+          },
+        }
+      : currentAdapter;
     const clients = Object.fromEntries(
       Object.entries(tables).map(([name, definition]) => [
         name,
-        new TableClient(definition, currentAdapter, options.telemetry),
+        new TableClient(definition, effectiveAdapter, options.telemetry),
       ]),
     ) as DatabaseTables<T>;
     return Object.assign(clients, {
+      queries: Object.fromEntries(
+        Object.entries(registeredQueries).map(([name, query]) => [
+          name,
+          async (params: Record<string, unknown>, queryOptions?: QueryOptions) => {
+            assertActive();
+            return (await effectiveAdapter.execute(query.compile(params), queryOptions)).rows;
+          },
+        ]),
+      ) as QueryFunctions<Q>,
       migrations: createMigrationsApi(currentAdapter, manifest),
       transaction: <R>(
-        callback: (database: DatabaseClient<T>) => Promise<R>,
+        callback: (database: DatabaseClient<T, Q>) => Promise<R>,
         transactionOptions?: TransactionOptions,
       ) =>
-        currentAdapter.transaction(
-          (transactionAdapter) => callback(create(transactionAdapter)),
-          transactionOptions,
-        ),
-      batch: async <const O extends readonly BatchItem<unknown, DatabaseClient<T>>[]>(
-        operations: O,
-      ) => {
-        const results: unknown[] = [];
-        for (const operation of operations) {
-          results.push(
-            typeof operation === "function"
-              ? await operation(create(currentAdapter))
-              : await operation.execute(currentAdapter),
-          );
-        }
-        return results as BatchResults<O>;
+        effectiveAdapter.transaction(async (transactionAdapter) => {
+          const lifetime = { active: true };
+          try {
+            return await callback(create(transactionAdapter, lifetime));
+          } finally {
+            lifetime.active = false;
+          }
+        }, transactionOptions),
+      close: () => {
+        assertActive();
+        return expires ? Promise.resolve() : currentAdapter.close?.() ?? Promise.resolve();
       },
-      close: () => currentAdapter.close?.() ?? Promise.resolve(),
     });
   };
   return create(adapter);

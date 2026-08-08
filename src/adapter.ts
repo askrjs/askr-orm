@@ -26,7 +26,19 @@ export interface DatabaseAdapter {
     options?: TransactionOptions,
   ): Promise<T>;
   session?<T>(callback: (adapter: DatabaseAdapter) => Promise<T>): Promise<T>;
+  migrationLock?<T>(callback: (adapter: DatabaseAdapter) => Promise<T>): Promise<T>;
   close?(): Promise<void>;
+}
+
+export type DialectName = "postgres" | "sqlite";
+
+/** Internal contract implemented by dialect entrypoints. */
+export interface DatabaseDriver {
+  readonly dialect: DialectName;
+  readonly targetIdentity?: string;
+  readonly shadowIdentity?: string;
+  open(): Promise<DatabaseAdapter>;
+  shadow(): Promise<import("./definition").DatabaseToolingAdapter>;
 }
 
 export interface TransactionOptions {

@@ -1,9 +1,7 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 import {
-  postgresEnum,
   table,
   text,
-  timestampTz,
   toSnakeCase,
   uuid,
   type Codec,
@@ -12,6 +10,7 @@ import {
   type InferPatch,
   type InferRow,
 } from "./index";
+import { postgresEnum, timestampTz } from "./postgres";
 
 const lowerCaseEmail: Codec<string, string> = {
   name: "lowercase-email",

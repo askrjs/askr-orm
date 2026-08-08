@@ -14,5 +14,5 @@ The ORM intentionally resembles SQL more than an object graph.
 - Multiple database roots are independent.
 
 This design excludes relationship navigation, shared migration history across
-databases, cross-database joins, implicit transactions, write builders, nested
+databases, cross-database joins, implicit transactions, nested
 writes, and client-side query evaluation.

@@ -1,7 +1,8 @@
-import type { DatabaseAdapter, DatabaseOpenOptions } from "./adapter";
+import type { DatabaseAdapter, DatabaseDriver, DatabaseOpenOptions } from "./adapter";
 import { createDatabaseClient, type DatabaseClient } from "./client";
 import type { MigrationManifest } from "./migrations";
 import type { AnyTable, EnumDefinition, ViewDefinition } from "./schema";
+import type { RegisteredQuery } from "./registered-query";
 
 export interface DatabaseToolingAdapter {
   readonly identity: string;
@@ -22,9 +23,14 @@ export interface DatabaseToolingAdapter {
   close?(): Promise<void>;
 }
 
-export interface DatabaseDefinition<T extends Record<string, AnyTable>> {
+export interface DatabaseDefinition<
+  T extends Record<string, AnyTable>,
+  Q extends Record<string, RegisteredQuery<Record<string, unknown>>> = Record<never, never>,
+> {
   readonly kind: "database";
   readonly tables: T;
+  readonly dialect: DatabaseDriver["dialect"];
+  readonly queries: Q;
   readonly enums: readonly EnumDefinition<string>[];
   readonly views: readonly ViewDefinition[];
   readonly targetIdentity?: string;
@@ -32,11 +38,12 @@ export interface DatabaseDefinition<T extends Record<string, AnyTable>> {
   readonly target: () => Promise<DatabaseAdapter>;
   readonly scratch: () => Promise<DatabaseToolingAdapter>;
   readonly manifest?: MigrationManifest;
-  open(target?: "target", options?: DatabaseOpenOptions): Promise<DatabaseClient<T>>;
+  open(target?: "target", options?: DatabaseOpenOptions): Promise<DatabaseClient<T, Q>>;
 }
 
 export interface DefineDatabaseOptions<T extends Record<string, AnyTable>> {
   readonly tables: T;
+  readonly queries?: Readonly<Record<string, RegisteredQuery<Record<string, unknown>>>>;
   readonly enums?: readonly EnumDefinition<string>[];
   readonly views?: readonly ViewDefinition[];
   readonly targetIdentity?: string;
@@ -46,12 +53,87 @@ export interface DefineDatabaseOptions<T extends Record<string, AnyTable>> {
   readonly manifest?: MigrationManifest;
 }
 
+export interface GeneratedDatabaseArtifact {
+  readonly schemaIdentity?: string;
+  readonly manifest?: MigrationManifest;
+  readonly queries?: Readonly<Record<string, unknown>>;
+}
+
+export interface CleanDatabaseOptions<
+  T extends Record<string, AnyTable>,
+  Q extends Record<string, RegisteredQuery<Record<string, unknown>>> = Record<never, never>,
+> {
+  readonly driver: DatabaseDriver;
+  readonly tables: T;
+  readonly queries?: Q;
+  readonly generated?: GeneratedDatabaseArtifact;
+  readonly enums?: readonly EnumDefinition<string>[];
+  readonly views?: readonly ViewDefinition[];
+}
+
+export function defineDatabase<
+  const T extends Record<string, AnyTable>,
+  const Q extends Record<string, RegisteredQuery<Record<string, unknown>>> = Record<never, never>,
+>(options: CleanDatabaseOptions<T, Q>): DatabaseDefinition<T, Q> {
+  assertDialectCompatibility(options.driver.dialect, options.tables, options.enums ?? []);
+  const queries = options.queries ?? ({} as Q);
+  return {
+    kind: "database",
+    dialect: options.driver.dialect,
+    tables: options.tables,
+    queries,
+    enums: options.enums ?? [],
+    views: options.views ?? [],
+    ...(options.driver.targetIdentity === undefined
+      ? {}
+      : { targetIdentity: options.driver.targetIdentity }),
+    ...(options.driver.shadowIdentity === undefined
+      ? {}
+      : { scratchIdentity: options.driver.shadowIdentity }),
+    target: () => options.driver.open(),
+    scratch: () => options.driver.shadow(),
+    ...(options.generated?.manifest === undefined
+      ? {}
+      : { manifest: options.generated.manifest }),
+    async open(_target = "target", openOptions = {}) {
+      return createDatabaseClient(
+        options.tables,
+        await options.driver.open(),
+        options.generated?.manifest,
+        openOptions,
+        queries,
+      );
+    },
+  };
+}
+
+function assertDialectCompatibility(
+  dialect: DatabaseDriver["dialect"],
+  tables: Record<string, AnyTable>,
+  enums: readonly EnumDefinition<string>[],
+): void {
+  if (dialect === "sqlite" && enums.length > 0) {
+    throw new Error("PostgreSQL enums cannot be used by a SQLite database definition.");
+  }
+  for (const table of Object.values(tables)) {
+    for (const column of Object.values(table.$columns)) {
+      if (column.ast.dialect && column.ast.dialect !== dialect) {
+        throw new Error(
+          `${table.$name}.${column.ast.name} requires the ${column.ast.dialect} dialect.`,
+        );
+      }
+    }
+  }
+}
+
 export function database<T extends Record<string, AnyTable>>(
   options: DefineDatabaseOptions<T>,
 ): DatabaseDefinition<T> {
   return {
     kind: "database",
+    dialect: "postgres",
     tables: options.tables,
+    queries: options.queries ?? {},
     enums: options.enums ?? [],
     views: options.views ?? [],
     ...(options.targetIdentity === undefined ? {} : { targetIdentity: options.targetIdentity }),
@@ -71,7 +153,7 @@ export function database<T extends Record<string, AnyTable>>(
 }
 
 export interface DatabaseRegistry<
-  T extends Record<string, DatabaseDefinition<Record<string, AnyTable>>>,
+  T extends Record<string, DatabaseDefinition<Record<string, AnyTable>, Record<string, RegisteredQuery<Record<string, unknown>>>>>,
 > {
   readonly kind: "database-registry";
   readonly databases: T;
@@ -79,7 +161,7 @@ export interface DatabaseRegistry<
 }
 
 export function databases<
-  const T extends Record<string, DatabaseDefinition<Record<string, AnyTable>>>,
+  const T extends Record<string, DatabaseDefinition<Record<string, AnyTable>, Record<string, RegisteredQuery<Record<string, unknown>>>>>,
 >(definitions: T): DatabaseRegistry<T> {
   return {
     kind: "database-registry",

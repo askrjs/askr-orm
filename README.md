@@ -1,159 +1,95 @@
 # `@askrjs/orm`
 
-Postgres-first, SQL-shaped data access for Askr.
+SQL-shaped data access for PostgreSQL 16–18 and SQLite on Node 24 or newer.
 
-`@askrjs/orm` sits between a micro-ORM and a generated data layer: database
-definitions are TypeScript, generated artifacts are committed, CRUD is
-status-first, and read queries retain an explicit SQL shape. It does not track
-objects, infer relation graphs, or perform nested writes.
+This package is a clean v1 candidate and remains intentionally unreleased at
+version `0.0.0`. It has no identity map, lazy loading, relation includes,
+nested writes, startup migration, or rollback migrations.
 
-The supported runtime is Node 20.19+ or Node 22.12+. PostgreSQL 16, 17, and 18
-are the v1 compatibility targets.
-
-## Define a database
+## Define one database
 
 ```ts
-// database/users.ts
-import { table, text, timestampTz, uuid } from "@askrjs/orm";
-import { groups } from "./groups";
+import { defineDatabase, defineQuery, table, text, uuid } from "@askrjs/orm";
+import { postgres } from "@askrjs/orm/postgres";
+import { generated } from "./generated.js";
 
-export const users = table("users", {
-  id: uuid().primaryKey().defaultRandom(),
+const users = table("users", {
+  id: uuid().primaryKey(),
   email: text().notNull().unique(),
-  groupId: uuid()
-    .notNull()
-    .references(() => groups.id),
-  createdAt: timestampTz().notNull().defaultNow(),
+});
+
+const byEmail = defineQuery<{ email: string }>("users.by-email")`
+  SELECT id, email FROM users WHERE email = ${"email"}
+`;
+
+export const database = defineDatabase({
+  driver: postgres(),
+  tables: { users },
+  queries: { byEmail },
+  generated,
 });
 ```
 
-Properties map from camel case to snake case. Use `.name("legacy_name")` for
-an explicit SQL identifier. Column codecs preserve application-specific value
-types while controlling database encoding and decoding.
+`postgres()` lazily reads `DATABASE_URL` and `DATABASE_SHADOW_URL`. PostgreSQL
+support has optional `pg` and `pg-query-stream` peers, so root and SQLite-only
+imports do not load them. Use `sqlite()` from `@askrjs/orm/sqlite`; it reads
+`DATABASE_PATH`, accepts an explicit filename, and always uses an isolated
+in-memory shadow database.
 
-The root exports lazy factories. Importing definitions never opens a
-connection:
+Definitions validate dialect-specific columns before a connection is opened.
+Every database selects exactly one dialect and owns an independent migration
+history.
+
+## Runtime
 
 ```ts
-// database/index.ts
-import { database } from "@askrjs/orm";
-import { migrationManifest } from "./generated";
-import { groups } from "./groups";
-import { users } from "./users";
-import { openScratch, openTarget } from "./postgres-adapter";
+const db = await database.open();
 
-export default database({
-  tables: { groups, users },
-  manifest: migrationManifest,
-  targetIdentity: "app-production",
-  scratchIdentity: "app-orm-scratch",
-  target: openTarget,
-  scratch: openScratch,
-});
+await db.users.get(userId);
+await db.users.insert({ id: userId, email });
+await db.users.insert({ id: userId, email }, { returning: "row" });
+await db.users.insertMany(rows, { returning: "rows" });
+await db.users.update(userId, { email });
+await db.users.delete(userId);
+await db.users.upsert({ id: userId, email });
+await db.users.upsertMany(rows);
+
+const rows = await db.queries.byEmail({ email });
 ```
 
-The application-owned adapter implements `DatabaseAdapter`; generation uses
-the separate `DatabaseToolingAdapter`. This keeps the runtime contract
-driver-neutral and makes destructive scratch reset an explicit integration
+Composite primary keys accept only key objects; single-column keys also accept
+their scalar value. Writes return status by default. Ordinary promises are the
+non-atomic coordination mechanism; use `db.transaction(...)` when operations
+must be atomic. Nested transactions use savepoints, and a transaction client
+throws after its callback completes.
+
+Read builders are immutable and parameterized, support typed projections and
+joins, and expose preparation, streaming, and `toSQL()`. Dynamic identifiers
+must use the identifier API; arbitrary SQL requires the explicit unsafe
 boundary.
 
-## Generate and validate
-
-Install `@askrjs/orm` in the project, then use the unified Askr CLI:
+## Tooling and migrations
 
 ```text
+askr add database postgres
+askr add database sqlite
 askr database generate
 askr database validate
 askr database migration plan
 askr database migration apply --yes
 ```
 
-Generation resets only the named scratch database, replays committed
-migrations, describes keyed SQL, writes a forward migration when needed, and
-regenerates `database/generated/`. It never applies to the target.
+Generation replays checksummed, forward-only SQL against the shadow database
+before accepting it. It writes migration SQL plus one committed
+`database/generated.ts` artifact containing schema identity, migration
+manifest, and registered-query metadata. Opening a database never applies
+migrations.
 
-Validation performs the same scratch replay and then compares both the
-introspected schema and every generated byte. `askr check` discovers
-`database/index.ts` and runs this validation automatically.
+Drops, ambiguous conversions, and destructive constraint changes require an
+explicit manual migration; live schema definitions do not retain `.drop()`
+markers.
 
-See [migration safety](docs/migrations.md) and the
-[adapter contract](docs/adapters.md). The structural runtime overhead gate is
-documented in [performance](docs/performance.md).
-
-## CRUD and batches
-
-```ts
-const db = await database.open("target");
-
-await db.users.get(userId); // User | null
-await db.users.insert({ email, groupId }); // { rowsAffected }
-await db.users.update(userId, { email }); // { rowsAffected }
-await db.users.delete(userId); // { rowsAffected }
-
-const user = await db.users.insert({ email, groupId }, { returning: "row" });
-
-await db.users.insertMany(rows, { chunkSize: 500 });
-await db.users.upsertMany(rows, { chunkSize: 500 });
-
-const [inserted, removed] = await db.batch([
-  (current) => current.users.insert({ email, groupId }),
-  (current) => current.users.delete(oldUserId),
-] as const);
-```
-
-Bulk operations and `db.batch` do not create transactions. Wrap them in
-`db.transaction(...)` when atomicity is required.
-
-## SQL-shaped reads
-
-```ts
-import { eq } from "@askrjs/orm";
-
-const query = db.users
-  .leftJoin(db.groups)
-  .on(({ users, groups }) => eq(users.groupId, groups.id))
-  .select(({ users, groups }) => ({
-    userId: users.id,
-    email: users.email,
-    groupName: groups.name,
-  }))
-  .where(({ users }) => eq(users.email, email))
-  .orderBy(({ users }) => users.email);
-
-const rows = await query.execute({ signal });
-const prepared = query.prepare("users-with-groups");
-const sql = query.toSQL();
-```
-
-Joins require an explicit `on` and projection. Self-joins require `as`.
-Outer-join references carry nullable value types. Values are parameters;
-identifiers must come from generated descriptors or `sql.identifier`.
-`sql.unsafe` is the explicit arbitrary-SQL boundary.
-
-## Keyed SQL
-
-Static SQL can live anywhere in project source:
-
-```ts
-export const userByEmail = sql.key("users.by-email", { email: "" as string })`
-  SELECT id, email
-  FROM users
-  WHERE email = :email
-`;
-```
-
-Keys must be stable and unique. Generation scans the static template, asks the
-scratch adapter to describe it, and emits the parameter/result registry in
-`database/generated/queries.ts`. Runtime execution uses the key as the prepared
-statement name:
-
-```ts
-const rows = await executeKeyedSql(adapter, userByEmail, { email });
-```
-
-## Non-goals
-
-V1 has no identity map, change tracking, lazy loading, relation includes,
-nested writes, rollback migrations, startup auto-migration, seeds, materialized
-views, extensions, triggers, functions, RLS, partitions, or generated runtime
-validation schemas. Existing databases are not adopted by introspection.
+SQLite uses Node's synchronous `node:sqlite` API behind a re-entrant async
+connection queue. Transactions and streams hold the connection; cancellation
+is checked between streamed rows, but a synchronous statement already running
+cannot be interrupted.

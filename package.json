@@ -39,6 +39,14 @@
       "types": "./dist/tooling.d.ts",
       "import": "./dist/tooling.js"
     },
+    "./postgres": {
+      "types": "./dist/postgres.d.ts",
+      "import": "./dist/postgres.js"
+    },
+    "./sqlite": {
+      "types": "./dist/sqlite.d.ts",
+      "import": "./dist/sqlite.js"
+    },
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -63,11 +71,20 @@
   "dependencies": {
     "tsx": "^4.23.11"
   },
+  "peerDependencies": {
+    "pg": "^8.16.0",
+    "pg-query-stream": "^4.10.0"
+  },
+  "peerDependenciesMeta": {
+    "pg": { "optional": true },
+    "pg-query-stream": { "optional": true }
+  },
   "devDependencies": {
     "@types/node": "^26.2.0",
     "@types/pg": "^8.21.0",
     "@vitest/coverage-v8": "^4.1.10",
     "pg": "^8.22.0",
+    "pg-query-stream": "^4.10.3",
     "publint": "^0.3.23",
     "typescript": "^7.0.2",
     "vite-plus": "^0.2.8",
