@@ -327,7 +327,10 @@ export class TableClient<T extends AnyTable> {
 
   async upsertMany(
     inputs: readonly InferInsert<T>[],
-    options: QueryOptions & { readonly chunkSize?: number; readonly returning?: "status" | "rows" } = {},
+    options: QueryOptions & {
+      readonly chunkSize?: number;
+      readonly returning?: "status" | "rows";
+    } = {},
   ): Promise<WriteResult | readonly InferRow<T>[]> {
     if (inputs.length === 0) return options.returning === "rows" ? [] : { rowsAffected: 0 };
     const primary = Object.entries(this.definition.$columns).filter(
@@ -375,12 +378,12 @@ export class TableClient<T extends AnyTable> {
         values,
       };
       const result = await execute(
-          this.adapter,
-          query,
-          options,
-          this.telemetry,
-          `${this.definition.$name}.upsertMany`,
-        );
+        this.adapter,
+        query,
+        options,
+        this.telemetry,
+        `${this.definition.$name}.upsertMany`,
+      );
       rowsAffected += result.rowCount;
       if (options.returning === "rows") {
         returned.push(...result.rows.map((row) => decodeRow(this.definition, row)));
@@ -437,16 +440,23 @@ export function createDatabaseClient<
   options: DatabaseOpenOptions = {},
   registeredQueries: Q = {} as Q,
 ): DatabaseClient<T, Q> {
-  const create = (currentAdapter: DatabaseAdapter, expires?: { active: boolean }): DatabaseClient<T, Q> => {
+  const create = (
+    currentAdapter: DatabaseAdapter,
+    expires?: { active: boolean },
+  ): DatabaseClient<T, Q> => {
     const assertActive = () => {
       if (expires && !expires.active) throw new Error("Transaction client is no longer active.");
     };
     const effectiveAdapter: DatabaseAdapter = expires
       ? {
-          execute(query, queryOptions) { assertActive(); return currentAdapter.execute(query, queryOptions); },
+          execute(query, queryOptions) {
+            assertActive();
+            return currentAdapter.execute(query, queryOptions);
+          },
           stream(query, queryOptions) {
             assertActive();
-            if (!currentAdapter.stream) throw new Error("Streaming is not supported by this adapter.");
+            if (!currentAdapter.stream)
+              throw new Error("Streaming is not supported by this adapter.");
             return currentAdapter.stream(query, queryOptions);
           },
           transaction(callback, transactionOptions) {
@@ -486,7 +496,7 @@ export function createDatabaseClient<
         }, transactionOptions),
       close: () => {
         assertActive();
-        return expires ? Promise.resolve() : currentAdapter.close?.() ?? Promise.resolve();
+        return expires ? Promise.resolve() : (currentAdapter.close?.() ?? Promise.resolve());
       },
     });
   };

@@ -195,9 +195,7 @@ export function createMigrationsApi(
 
     async apply(options = {}) {
       if (!adapter.migrationLock) {
-        throw new Error(
-          "Migration apply requires dialect migration locking support.",
-        );
+        throw new Error("Migration apply requires dialect migration locking support.");
       }
       try {
         return await adapter.migrationLock(async (session) => {

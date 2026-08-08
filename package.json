@@ -71,14 +71,6 @@
   "dependencies": {
     "tsx": "^4.23.11"
   },
-  "peerDependencies": {
-    "pg": "^8.16.0",
-    "pg-query-stream": "^4.10.0"
-  },
-  "peerDependenciesMeta": {
-    "pg": { "optional": true },
-    "pg-query-stream": { "optional": true }
-  },
   "devDependencies": {
     "@types/node": "^26.2.0",
     "@types/pg": "^8.21.0",
@@ -89,6 +81,18 @@
     "typescript": "^7.0.2",
     "vite-plus": "^0.2.8",
     "vitest": "^4.1.10"
+  },
+  "peerDependencies": {
+    "pg": "^8.16.0",
+    "pg-query-stream": "^4.10.0"
+  },
+  "peerDependenciesMeta": {
+    "pg": {
+      "optional": true
+    },
+    "pg-query-stream": {
+      "optional": true
+    }
   },
   "engines": {
     "node": ">=24.0.0"

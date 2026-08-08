@@ -16,14 +16,22 @@ describe("SQLite dialect", () => {
       values: ["u1", "Ada"],
     });
     await adapter.transaction(async (transaction) => {
-      await transaction.execute({ text: 'UPDATE "public"."users" SET "name" = $1', values: ["Grace"] });
-      await expect(transaction.transaction(async (nested) => {
-        await nested.execute({ text: 'DELETE FROM "public"."users"', values: [] });
-        throw new Error("rollback nested");
-      })).rejects.toThrow("rollback nested");
+      await transaction.execute({
+        text: 'UPDATE "public"."users" SET "name" = $1',
+        values: ["Grace"],
+      });
+      await expect(
+        transaction.transaction(async (nested) => {
+          await nested.execute({ text: 'DELETE FROM "public"."users"', values: [] });
+          throw new Error("rollback nested");
+        }),
+      ).rejects.toThrow("rollback nested");
     });
     const rows = [];
-    for await (const row of adapter.stream!<{ name: string }>({ text: 'SELECT "name" FROM "public"."users"', values: [] })) {
+    for await (const row of adapter.stream!<{ name: string }>({
+      text: 'SELECT "name" FROM "public"."users"',
+      values: [],
+    })) {
       rows.push(row);
     }
     expect(rows).toEqual([{ name: "Grace" }]);
@@ -43,22 +51,26 @@ describe("SQLite dialect", () => {
       text: "SELECT * FROM users WHERE id = $1",
       values: ["u1"],
     });
-    expect(() => defineDatabase({
-      driver: sqlite({ filename: ":memory:" }),
-      tables: { events: table("events", { payload: jsonb() }) },
-    })).toThrow(/requires the postgres dialect/);
+    expect(() =>
+      defineDatabase({
+        driver: sqlite({ filename: ":memory:" }),
+        tables: { events: table("events", { payload: jsonb() }) },
+      }),
+    ).toThrow(/requires the postgres dialect/);
   });
 
   it("should apply migrations under the SQLite connection lock", async () => {
     const adapter = await sqlite({ filename: ":memory:" }).open();
     const migrations = createMigrationsApi(adapter, {
-      migrations: [{
-        id: "01",
-        parent: null,
-        checksum: "initial",
-        sql: 'CREATE TABLE "public"."items" ("id" text PRIMARY KEY)',
-        transactional: true,
-      }],
+      migrations: [
+        {
+          id: "01",
+          parent: null,
+          checksum: "initial",
+          sql: 'CREATE TABLE "public"."items" ("id" text PRIMARY KEY)',
+          transactional: true,
+        },
+      ],
     });
     await expect(migrations.apply()).resolves.toEqual({ applied: ["01"] });
     expect((await migrations.plan()).pending).toHaveLength(0);

@@ -140,10 +140,7 @@ export default defineDatabase({
     expect(await runDatabaseCli(["generate"], { cwd: root, io })).toBe(0);
     expect(logs.at(-1)).toBe("default: unchanged");
 
-    const generated = await fs.readFile(
-      path.join(root, "database", "generated.ts"),
-      "utf8",
-    );
+    const generated = await fs.readFile(path.join(root, "database", "generated.ts"), "utf8");
     expect(generated).toContain('"users.by-email"');
     expect(generated).toContain('readonly "id": string;');
   });

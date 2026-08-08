@@ -1,7 +1,10 @@
 import type { QueryOptions } from "./adapter";
 import type { SqlQuery } from "./sql";
 
-export interface RegisteredQuery<Params extends Record<string, unknown>, Row = Record<string, unknown>> {
+export interface RegisteredQuery<
+  Params extends Record<string, unknown>,
+  Row = Record<string, unknown>,
+> {
   readonly kind: "registered-query";
   readonly key: string;
   readonly strings: readonly string[];

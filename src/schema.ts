@@ -232,7 +232,10 @@ export const jsonb = <T = unknown>(): ColumnBuilder<T> =>
 export const date = (): ColumnBuilder<string> => column<string>("date");
 export const timestamp = (): ColumnBuilder<string> => column<string>("timestamp without time zone");
 export const timestampTz = (): ColumnBuilder<string> =>
-  new ColumnBuilder<string>({ ...column<string>("timestamp with time zone").ast, dialect: "postgres" });
+  new ColumnBuilder<string>({
+    ...column<string>("timestamp with time zone").ast,
+    dialect: "postgres",
+  });
 export const bytes = (): ColumnBuilder<Uint8Array> => column<Uint8Array>("bytes");
 export const bytea = (): ColumnBuilder<Uint8Array> =>
   new ColumnBuilder<Uint8Array>({ ...column<Uint8Array>("bytea").ast, dialect: "postgres" });

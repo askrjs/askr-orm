@@ -24,7 +24,11 @@ export {
   type CleanDatabaseOptions,
   type GeneratedDatabaseArtifact,
 } from "./definition";
-export { defineQuery, type RegisteredQuery, type RegisteredQueryFunction } from "./registered-query";
+export {
+  defineQuery,
+  type RegisteredQuery,
+  type RegisteredQueryFunction,
+} from "./registered-query";
 export { DatabaseError, normalizeDatabaseError, type DatabaseErrorCategory } from "./errors";
 export {
   type AppliedMigration,

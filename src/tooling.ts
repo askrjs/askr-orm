@@ -173,7 +173,11 @@ function sqlString(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
 }
 
-function qualified(schema: string, name: string, dialect: "postgres" | "sqlite" = "postgres"): string {
+function qualified(
+  schema: string,
+  name: string,
+  dialect: "postgres" | "sqlite" = "postgres",
+): string {
   return dialect === "sqlite"
     ? quoteIdentifier(name)
     : `${quoteIdentifier(schema)}.${quoteIdentifier(name)}`;
@@ -181,7 +185,13 @@ function qualified(schema: string, name: string, dialect: "postgres" | "sqlite" 
 
 function physicalType(dataType: string, dialect: "postgres" | "sqlite"): string {
   if (dialect === "postgres") return dataType === "bytes" ? "bytea" : dataType;
-  if (dataType === "uuid" || dataType === "json" || dataType.startsWith("timestamp") || dataType === "date") return "text";
+  if (
+    dataType === "uuid" ||
+    dataType === "json" ||
+    dataType.startsWith("timestamp") ||
+    dataType === "date"
+  )
+    return "text";
   if (dataType === "boolean" || dataType === "bigint") return "integer";
   if (dataType === "bytes" || dataType === "bytea") return "blob";
   return dataType === "double precision" ? "real" : dataType;
@@ -249,7 +259,10 @@ function activeSnapshot(snapshot: SchemaSnapshot): SchemaSnapshot {
   };
 }
 
-function renderInitialSchema(snapshot: SchemaSnapshot, dialect: "postgres" | "sqlite" = "postgres"): string {
+function renderInitialSchema(
+  snapshot: SchemaSnapshot,
+  dialect: "postgres" | "sqlite" = "postgres",
+): string {
   const statements: string[] = [];
   const schemas = new Set([
     ...snapshot.enums.map((entry) => entry.schema),
@@ -280,7 +293,11 @@ function byName<T extends { readonly schema: string; readonly name: string }>(
   return new Map(values.map((value) => [`${value.schema}.${value.name}`, value]));
 }
 
-export function diffSnapshots(current: SchemaSnapshot, desiredInput: SchemaSnapshot, dialect: "postgres" | "sqlite" = "postgres"): string {
+export function diffSnapshots(
+  current: SchemaSnapshot,
+  desiredInput: SchemaSnapshot,
+  dialect: "postgres" | "sqlite" = "postgres",
+): string {
   const desired = activeSnapshot(desiredInput);
   if (current.tables.length === 0 && current.enums.length === 0 && current.views.length === 0) {
     return renderInitialSchema(desired, dialect);
@@ -397,9 +414,7 @@ export function diffSnapshots(current: SchemaSnapshot, desiredInput: SchemaSnaps
   for (const table of current.tables) {
     if (desiredTables.has(`${table.schema}.${table.name}`)) continue;
     const renamed = desiredInput.tables.some(
-      (candidate) =>
-        candidate.schema === table.schema &&
-        candidate.renamedFrom === table.name,
+      (candidate) => candidate.schema === table.schema && candidate.renamedFrom === table.name,
     );
     if (renamed) continue;
     throw new Error(`Dropping table ${table.name} requires an explicit manual migration.`);
@@ -495,7 +510,10 @@ async function findDatabaseEntry(
 ): Promise<{ projectRoot: string; databaseDir: string }> {
   let current = path.resolve(start);
   while (true) {
-    for (const relative of [["database", "index.ts"], ["src", "database", "index.ts"]]) {
+    for (const relative of [
+      ["database", "index.ts"],
+      ["src", "database", "index.ts"],
+    ]) {
       const candidate = path.join(current, ...relative);
       if (await fs.stat(candidate).catch(() => null)) {
         return { projectRoot: current, databaseDir: path.dirname(candidate) };

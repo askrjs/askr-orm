@@ -92,9 +92,7 @@ export function defineDatabase<
       : { scratchIdentity: options.driver.shadowIdentity }),
     target: () => options.driver.open(),
     scratch: () => options.driver.shadow(),
-    ...(options.generated?.manifest === undefined
-      ? {}
-      : { manifest: options.generated.manifest }),
+    ...(options.generated?.manifest === undefined ? {} : { manifest: options.generated.manifest }),
     async open(_target = "target", openOptions = {}) {
       return createDatabaseClient(
         options.tables,
@@ -153,7 +151,13 @@ export function database<T extends Record<string, AnyTable>>(
 }
 
 export interface DatabaseRegistry<
-  T extends Record<string, DatabaseDefinition<Record<string, AnyTable>, Record<string, RegisteredQuery<Record<string, unknown>>>>>,
+  T extends Record<
+    string,
+    DatabaseDefinition<
+      Record<string, AnyTable>,
+      Record<string, RegisteredQuery<Record<string, unknown>>>
+    >
+  >,
 > {
   readonly kind: "database-registry";
   readonly databases: T;
@@ -161,7 +165,13 @@ export interface DatabaseRegistry<
 }
 
 export function databases<
-  const T extends Record<string, DatabaseDefinition<Record<string, AnyTable>, Record<string, RegisteredQuery<Record<string, unknown>>>>>,
+  const T extends Record<
+    string,
+    DatabaseDefinition<
+      Record<string, AnyTable>,
+      Record<string, RegisteredQuery<Record<string, unknown>>>
+    >
+  >,
 >(definitions: T): DatabaseRegistry<T> {
   return {
     kind: "database-registry",
