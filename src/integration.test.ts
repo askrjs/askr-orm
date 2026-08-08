@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import { Pool, type PoolClient, type QueryResult } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { DatabaseAdapter, ExecutionResult, QueryOptions, TransactionOptions } from "./adapter";
-import { createDatabaseClient, eq, table, text, timestampTz, uuid } from "./index";
+import { createDatabaseClient, eq, table, text, uuid } from "./index";
+import { timestampTz } from "./postgres";
 import { createMigrationsApi, type MigrationManifest } from "./migrations";
 import type { SqlQuery } from "./sql";
 
@@ -64,6 +65,17 @@ class PgAdapter implements DatabaseAdapter {
     } finally {
       client.release();
     }
+  }
+
+  async migrationLock<T>(callback: (adapter: DatabaseAdapter) => Promise<T>): Promise<T> {
+    return this.session(async (session) => {
+      await session.execute({ text: "SELECT pg_advisory_lock(4707438161740729)", values: [] });
+      try {
+        return await callback(session);
+      } finally {
+        await session.execute({ text: "SELECT pg_advisory_unlock(4707438161740729)", values: [] });
+      }
+    });
   }
 
   async close(): Promise<void> {

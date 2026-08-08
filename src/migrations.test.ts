@@ -62,6 +62,10 @@ class MigrationAdapter implements DatabaseAdapter {
     this.sessions += 1;
     return callback(this);
   }
+
+  async migrationLock<T>(callback: (adapter: DatabaseAdapter) => Promise<T>): Promise<T> {
+    return this.session(callback);
+  }
 }
 
 const manifest: MigrationManifest = {
@@ -96,8 +100,6 @@ describe("migrations", () => {
     });
     expect(adapter.sessions).toBe(1);
     expect(adapter.transactions).toBe(1);
-    expect(adapter.statements).toContain("SELECT pg_advisory_lock(4707438161740729)");
-    expect(adapter.statements).toContain("SELECT pg_advisory_unlock(4707438161740729)");
     expect(events).toEqual([
       "lock-acquired",
       "started",

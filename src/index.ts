@@ -1,5 +1,7 @@
 export type {
   DatabaseAdapter,
+  DatabaseDriver,
+  DialectName,
   DatabaseOpenOptions,
   ExecutionResult,
   QueryOptions,
@@ -10,22 +12,23 @@ export type {
 export {
   createDatabaseClient,
   TableClient,
-  type BatchOperation,
-  type BatchItem,
-  type BatchResults,
   type DatabaseClient,
   type ReturningRows,
   type ReturningStatus,
   type WriteResult,
 } from "./client";
 export {
-  database,
-  databases,
+  defineDatabase,
   type DatabaseDefinition,
-  type DatabaseRegistry,
   type DatabaseToolingAdapter,
-  type DefineDatabaseOptions,
+  type CleanDatabaseOptions,
+  type GeneratedDatabaseArtifact,
 } from "./definition";
+export {
+  defineQuery,
+  type RegisteredQuery,
+  type RegisteredQueryFunction,
+} from "./registered-query";
 export { DatabaseError, normalizeDatabaseError, type DatabaseErrorCategory } from "./errors";
 export {
   type AppliedMigration,
@@ -51,22 +54,18 @@ export {
 export {
   bigInt,
   boolean,
-  bytea,
+  bytes,
   check,
   date,
   doublePrecision,
   index,
   integer,
   json,
-  jsonb,
   numeric,
-  postgresEnum,
-  postgresType,
   real,
   table,
   text,
   timestamp,
-  timestampTz,
   unique,
   uuid,
   view,

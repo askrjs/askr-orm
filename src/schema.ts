@@ -25,7 +25,7 @@ export interface ColumnAst {
   readonly references?: () => AnyColumn;
   readonly codec?: Codec<unknown, unknown>;
   readonly renamedFrom?: string;
-  readonly drop?: boolean;
+  readonly dialect?: "postgres" | "sqlite";
   readonly convertUsing?: string;
 }
 
@@ -83,7 +83,11 @@ export class ColumnBuilder<
   }
 
   defaultRandom(): ColumnBuilder<T, NotNull, true, Primary> {
-    return this.default("gen_random_uuid()");
+    return new ColumnBuilder<T, NotNull, true, Primary>({
+      ...this.ast,
+      default: "gen_random_uuid()",
+      dialect: "postgres",
+    });
   }
 
   generatedAlwaysAs(expression: string): ColumnBuilder<T, NotNull, true, Primary> {
@@ -105,10 +109,6 @@ export class ColumnBuilder<
 
   renamedFrom(name: string): ColumnBuilder<T, NotNull, HasDefault, Primary> {
     return this.copy({ renamedFrom: name });
-  }
-
-  drop(): ColumnBuilder<T, NotNull, HasDefault, Primary> {
-    return this.copy({ drop: true });
   }
 
   convertUsing(expression: string): ColumnBuilder<T, NotNull, HasDefault, Primary> {
@@ -157,7 +157,6 @@ export type TableConstraint = CheckConstraint | UniqueConstraint | IndexDefiniti
 export interface TableOptions {
   readonly schema?: string;
   readonly renamedFrom?: string;
-  readonly drop?: boolean;
   readonly constraints?: readonly TableConstraint[];
 }
 
@@ -228,12 +227,20 @@ export const numeric = (precision?: number, scale?: number): ColumnBuilder<strin
       : `numeric(${precision}${scale === undefined ? "" : `,${scale}`})`,
   );
 export const json = <T = unknown>(): ColumnBuilder<T> => column<T>("json");
-export const jsonb = <T = unknown>(): ColumnBuilder<T> => column<T>("jsonb");
+export const jsonb = <T = unknown>(): ColumnBuilder<T> =>
+  new ColumnBuilder<T>({ ...column<T>("jsonb").ast, dialect: "postgres" });
 export const date = (): ColumnBuilder<string> => column<string>("date");
 export const timestamp = (): ColumnBuilder<string> => column<string>("timestamp without time zone");
-export const timestampTz = (): ColumnBuilder<string> => column<string>("timestamp with time zone");
-export const bytea = (): ColumnBuilder<Uint8Array> => column<Uint8Array>("bytea");
-export const postgresType = <T>(name: string): ColumnBuilder<T> => column<T>(name);
+export const timestampTz = (): ColumnBuilder<string> =>
+  new ColumnBuilder<string>({
+    ...column<string>("timestamp with time zone").ast,
+    dialect: "postgres",
+  });
+export const bytes = (): ColumnBuilder<Uint8Array> => column<Uint8Array>("bytes");
+export const bytea = (): ColumnBuilder<Uint8Array> =>
+  new ColumnBuilder<Uint8Array>({ ...column<Uint8Array>("bytea").ast, dialect: "postgres" });
+export const postgresType = <T>(name: string): ColumnBuilder<T> =>
+  new ColumnBuilder<T>({ ...column<T>(name).ast, dialect: "postgres" });
 
 export interface EnumDefinition<V extends string> {
   readonly kind: "enum";

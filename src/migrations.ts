@@ -53,7 +53,6 @@ export interface MigrationsApi {
   resolve(id: string, resolution: "applied" | "rolled-back", options?: QueryOptions): Promise<void>;
 }
 
-const LOCK_KEY = "4707438161740729";
 const LEDGER_SQL = `
 CREATE TABLE IF NOT EXISTS "_askr_migrations" (
   "id" text PRIMARY KEY,
@@ -195,37 +194,25 @@ export function createMigrationsApi(
     },
 
     async apply(options = {}) {
-      if (!adapter.session) {
-        throw new Error(
-          "Migration apply requires an adapter session() implementation so the advisory lock remains pinned.",
-        );
+      if (!adapter.migrationLock) {
+        throw new Error("Migration apply requires dialect migration locking support.");
       }
       try {
-        return await adapter.session(async (session) => {
-          await session.execute(
-            { text: `SELECT pg_advisory_lock(${LOCK_KEY})`, values: [] },
-            options,
-          );
+        return await adapter.migrationLock(async (session) => {
           options.onEvent?.({ type: "lock-acquired" });
           const applied: string[] = [];
-          try {
-            const plan = buildPlan(manifest, await history(session, options));
-            for (const migration of plan.pending) {
-              try {
-                await applyOne(session, migration, options);
-                applied.push(migration.id);
-              } catch (error) {
-                options.onEvent?.({ type: "failed", migration: migration.id });
-                throw error;
-              }
+          const plan = buildPlan(manifest, await history(session, options));
+          for (const migration of plan.pending) {
+            try {
+              await applyOne(session, migration, options);
+              applied.push(migration.id);
+            } catch (error) {
+              options.onEvent?.({ type: "failed", migration: migration.id });
+              throw error;
             }
-            options.onEvent?.({ type: "complete" });
-            return { applied };
-          } finally {
-            await session
-              .execute({ text: `SELECT pg_advisory_unlock(${LOCK_KEY})`, values: [] })
-              .catch(() => undefined);
           }
+          options.onEvent?.({ type: "complete" });
+          return { applied };
         });
       } catch (error) {
         throw normalizeDatabaseError(error);

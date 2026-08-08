@@ -53,17 +53,13 @@ describe("database client", () => {
     ).resolves.toEqual({ id: "u", email: "a@example.com", groupId: "g" });
   });
 
-  it("should not create implicit transactions for bulk writes or batches", async () => {
+  it("should not create implicit transactions for bulk writes", async () => {
     const adapter = new RecordingAdapter();
     const db = createDatabaseClient({ users }, adapter);
     await db.users.insertMany([
       { email: "one@example.com", groupId: "g" },
       { email: "two@example.com", groupId: "g" },
     ]);
-    await db.batch([
-      { execute: async () => "first" as const },
-      { execute: async () => 2 as const },
-    ] as const);
     expect(adapter.transactions).toBe(0);
 
     await db.transaction(async (transaction) =>

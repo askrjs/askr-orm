@@ -8,15 +8,15 @@ The runtime and tooling adapters are deliberately separate.
   timeout, and prepared-statement name.
 - `transaction` owns `BEGIN`, isolation/read-only settings, commit, and
   rollback.
-- `session` pins a physical PostgreSQL session. Migration application requires
-  it so the advisory lock cannot move between pooled connections.
+- `session` pins a physical database session.
+- `migrationLock` holds the dialect lock for the full plan and apply operation:
+  PostgreSQL uses an advisory lock and SQLite uses its serialized connection.
 - `stream` is optional. Calling `.stream()` fails clearly when the adapter does
   not provide a cursor-backed implementation.
 - `close` is optional and idempotent.
 
-An adapter must pass values to the driver separately from SQL text. It must not
-rewrite placeholders, interpolate data, rebuild a prepared query AST, or add a
-description round trip during prepared execution.
+An adapter must pass values to the driver separately from SQL text and never
+interpolate application data. Placeholder rendering is dialect-owned.
 
 `DatabaseToolingAdapter` is allowed only in tooling:
 

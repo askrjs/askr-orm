@@ -4,6 +4,8 @@ export default defineConfig({
   pack: {
     entry: {
       index: "src/index.ts",
+      postgres: "src/postgres.ts",
+      sqlite: "src/sqlite.ts",
       tooling: "src/tooling.ts",
     },
     format: ["esm"],
@@ -13,7 +15,7 @@ export default defineConfig({
     unbundle: true,
     outExtensions: () => ({ js: ".js" }),
     deps: {
-      neverBundle: ["tsx/esm/api", "typescript"],
+      neverBundle: ["pg", "pg-query-stream", "tsx/esm/api", "typescript"],
     },
   },
 });
