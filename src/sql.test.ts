@@ -49,6 +49,14 @@ describe("SQL boundaries", () => {
   });
 
   it("should replace only structural named parameters given inert SQL regions", () => {
+    const exact = sql.key("notes.search", { email: "" })`
+      SELECT id FROM users WHERE note = 'contact via :email for help' AND email = :email
+    `;
+    expect(compileKeyedSql(exact, { email: "attacker@example.com" })).toEqual({
+      text: "\n      SELECT id FROM users WHERE note = 'contact via :email for help' AND email = $1\n    ",
+      values: ["attacker@example.com"],
+    });
+
     let seed = 0x5eed;
     for (let sample = 0; sample < 100; sample += 1) {
       seed = (seed * 16_807) % 2_147_483_647;
