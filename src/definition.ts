@@ -4,6 +4,7 @@ import type { MigrationManifest } from "./migrations";
 import type { AnyTable, EnumDefinition, ViewDefinition } from "./schema";
 import type { RegisteredQuery } from "./registered-query";
 
+/** Administrative connection used by tooling (migrations, schema diffing) against a database. */
 export interface DatabaseToolingAdapter {
   readonly identity: string;
   reset(): Promise<void>;
@@ -23,6 +24,7 @@ export interface DatabaseToolingAdapter {
   close?(): Promise<void>;
 }
 
+/** Result of {@link defineDatabase}: the tables, dialect, and everything needed to open a client. */
 export interface DatabaseDefinition<
   T extends Record<string, AnyTable>,
   Q extends Record<string, RegisteredQuery<Record<string, unknown>>> = Record<never, never>,
@@ -41,12 +43,14 @@ export interface DatabaseDefinition<
   open(target?: "target", options?: DatabaseOpenOptions): Promise<DatabaseClient<T, Q>>;
 }
 
+/** Codegen output (schema identity, bundled migrations, precompiled queries) passed to {@link defineDatabase}. */
 export interface GeneratedDatabaseArtifact {
   readonly schemaIdentity?: string;
   readonly manifest?: MigrationManifest;
   readonly queries?: Readonly<Record<string, unknown>>;
 }
 
+/** Options accepted by {@link defineDatabase}. */
 export interface CleanDatabaseOptions<
   T extends Record<string, AnyTable>,
   Q extends Record<string, RegisteredQuery<Record<string, unknown>>> = Record<never, never>,
@@ -59,6 +63,12 @@ export interface CleanDatabaseOptions<
   readonly views?: readonly ViewDefinition[];
 }
 
+/**
+ * Declares a database's tables, enums, views, and driver, validating that every column is
+ * compatible with the driver's dialect.
+ *
+ * @throws If a SQLite driver is given enums, or a table column requires a different dialect.
+ */
 export function defineDatabase<
   const T extends Record<string, AnyTable>,
   const Q extends Record<string, RegisteredQuery<Record<string, unknown>>> = Record<never, never>,

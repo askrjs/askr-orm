@@ -1,3 +1,4 @@
+/** Coarse classification assigned to a normalized {@link DatabaseError}. */
 export type DatabaseErrorCategory =
   | "constraint"
   | "serialization"
@@ -7,6 +8,7 @@ export type DatabaseErrorCategory =
   | "connection"
   | "unknown";
 
+/** Uniform error thrown for database failures, produced by {@link normalizeDatabaseError}. */
 export class DatabaseError extends Error {
   readonly category: DatabaseErrorCategory;
   readonly code?: string;
@@ -49,6 +51,11 @@ interface DriverErrorLike {
 const CONSTRAINT_CODES = new Set(["23000", "23502", "23503", "23505", "23514", "23P01"]);
 const CONNECTION_PREFIXES = ["08", "53", "57P0"];
 
+/**
+ * Converts an unknown driver-thrown error (Postgres or SQLite) into a {@link DatabaseError},
+ * classifying it by inspecting driver-specific error codes/messages. Passes through values
+ * that are already a {@link DatabaseError} unchanged.
+ */
 export function normalizeDatabaseError(error: unknown): DatabaseError {
   if (error instanceof DatabaseError) return error;
   const value = (error && typeof error === "object" ? error : {}) as DriverErrorLike;

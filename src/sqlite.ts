@@ -12,6 +12,7 @@ import type { DatabaseToolingAdapter } from "./definition";
 import type { SqlQuery } from "./sql";
 import { rewritePlaceholders, sqliteSql } from "./placeholders";
 
+/** Options accepted by {@link sqlite}. */
 export interface SqliteOptions {
   readonly filename?: string | (() => string);
 }
@@ -249,6 +250,12 @@ function tooling(filename: string): DatabaseToolingAdapter {
   };
 }
 
+/**
+ * Creates a SQLite {@link DatabaseDriver} backed by `node:sqlite`. The filename defaults to
+ * `DATABASE_PATH`; its in-memory shadow database is used for migration tooling.
+ *
+ * @throws If no filename is configured and `DATABASE_PATH` is unset.
+ */
 export function sqlite(options: SqliteOptions = {}): DatabaseDriver {
   const configured = options.filename ?? (() => process.env.DATABASE_PATH ?? "");
   const filename = typeof configured === "function" ? configured() : configured;

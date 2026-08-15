@@ -12,11 +12,14 @@ import {
   tableRefs,
 } from "./sql";
 
+/** A `select()` projection: a map from output column name to a SQL expression. */
 export type Selection = Readonly<Record<string, Expression>>;
+/** Row shape produced by executing a query with the given {@link Selection}. */
 export type SelectionResult<S extends Selection> = Readonly<{
   [K in keyof S]: S[K] extends Expression<infer T> ? T : never;
 }>;
 
+/** Column references for a single table alias, keyed by alias then column property name. */
 export type References<T extends AnyTable, Alias extends string> = Readonly<
   Record<
     Alias,
@@ -28,6 +31,7 @@ export type References<T extends AnyTable, Alias extends string> = Readonly<
 
 type AnyReferences = Readonly<Record<string, Readonly<Record<string, ColumnRef>>>>;
 
+/** A table (or view) that can be passed to `join`/`leftJoin`/`rightJoin`/`fullJoin`. */
 export interface JoinTarget<T extends AnyTable = AnyTable> {
   readonly definition: T;
 }
@@ -166,12 +170,18 @@ function mapRows<Row>(
   ) as unknown as readonly Row[];
 }
 
+/**
+ * Immutable, chainable builder for a `SELECT` query against a table. Each method returns a new
+ * `SelectQuery`; call {@link execute}, {@link first}, {@link stream}, or {@link toSQL} to run or
+ * compile it. Created via {@link tableQuery} or {@link TableClient}.
+ */
 export class SelectQuery<Row, Refs extends AnyReferences> {
   constructor(
     private readonly adapter: DatabaseAdapter,
     private readonly state: QueryState,
   ) {}
 
+  /** Adds a `WHERE` predicate, ANDed with any existing predicates. */
   where(
     predicate: SqlFragment<boolean> | ((refs: Refs) => SqlFragment<boolean>),
   ): SelectQuery<Row, Refs> {
@@ -183,6 +193,7 @@ export class SelectQuery<Row, Refs extends AnyReferences> {
     });
   }
 
+  /** Adds `GROUP BY` expressions. */
   groupBy(
     ...groups: readonly (Expression | ((refs: Refs) => Expression))[]
   ): SelectQuery<Row, Refs> {
@@ -197,6 +208,7 @@ export class SelectQuery<Row, Refs extends AnyReferences> {
     });
   }
 
+  /** Sets the `HAVING` predicate, replacing any previous one. */
   having(
     predicate: SqlFragment<boolean> | ((refs: Refs) => SqlFragment<boolean>),
   ): SelectQuery<Row, Refs> {
@@ -207,6 +219,7 @@ export class SelectQuery<Row, Refs extends AnyReferences> {
     });
   }
 
+  /** Adds an `ORDER BY` expression, appended after any existing ordering. */
   orderBy(
     expression: Expression | ((refs: Refs) => Expression),
     direction: "asc" | "desc" = "asc",
@@ -226,18 +239,22 @@ export class SelectQuery<Row, Refs extends AnyReferences> {
     });
   }
 
+  /** Sets `LIMIT`. */
   limit(value: number): SelectQuery<Row, Refs> {
     return new SelectQuery(this.adapter, { ...this.state, limit: value });
   }
 
+  /** Sets `OFFSET`. */
   offset(value: number): SelectQuery<Row, Refs> {
     return new SelectQuery(this.adapter, { ...this.state, offset: value });
   }
 
+  /** Adds `DISTINCT` to the selection. */
   distinct(): SelectQuery<Row, Refs> {
     return new SelectQuery(this.adapter, { ...this.state, distinct: true });
   }
 
+  /** Adds a `WITH <name> AS (...)` common table expression, referencing another query's SQL. */
   with(name: string, query: { toSQL(): SqlQuery }): SelectQuery<Row, Refs> {
     return new SelectQuery(this.adapter, {
       ...this.state,
@@ -245,6 +262,7 @@ export class SelectQuery<Row, Refs extends AnyReferences> {
     });
   }
 
+  /** Sets the projected columns/expressions, replacing the default `SELECT *`. */
   select<const S extends Selection>(
     projection: S | ((refs: Refs) => S),
   ): SelectQuery<SelectionResult<S>, Refs> {
@@ -255,6 +273,7 @@ export class SelectQuery<Row, Refs extends AnyReferences> {
     });
   }
 
+  /** Starts an `INNER JOIN`; call `.on(...)` on the result to complete it. */
   join<T extends AnyTable, A extends string = T["$name"]>(
     target: JoinTarget<T>,
     options: { readonly as?: A } = {},
@@ -262,6 +281,7 @@ export class SelectQuery<Row, Refs extends AnyReferences> {
     return new PendingJoin(this.adapter, this.state, target.definition, options.as, "INNER");
   }
 
+  /** Starts a `LEFT JOIN`; call `.on(...)` on the result to complete it. */
   leftJoin<T extends AnyTable, A extends string = T["$name"]>(
     target: JoinTarget<T>,
     options: { readonly as?: A } = {},
@@ -269,6 +289,7 @@ export class SelectQuery<Row, Refs extends AnyReferences> {
     return new PendingJoin(this.adapter, this.state, target.definition, options.as, "LEFT");
   }
 
+  /** Starts a `RIGHT JOIN`; call `.on(...)` on the result to complete it. */
   rightJoin<T extends AnyTable, A extends string = T["$name"]>(
     target: JoinTarget<T>,
     options: { readonly as?: A } = {},
@@ -276,6 +297,7 @@ export class SelectQuery<Row, Refs extends AnyReferences> {
     return new PendingJoin(this.adapter, this.state, target.definition, options.as, "RIGHT");
   }
 
+  /** Starts a `FULL JOIN`; call `.on(...)` on the result to complete it. */
   fullJoin<T extends AnyTable, A extends string = T["$name"]>(
     target: JoinTarget<T>,
     options: { readonly as?: A } = {},
@@ -283,10 +305,12 @@ export class SelectQuery<Row, Refs extends AnyReferences> {
     return new PendingJoin(this.adapter, this.state, target.definition, options.as, "FULL");
   }
 
+  /** Compiles the query to SQL text and parameter values without executing it. */
   toSQL(): SqlQuery {
     return compileState(this.state).query;
   }
 
+  /** Compiles and runs the query, returning all matching rows. */
   async execute(options: QueryOptions = {}): Promise<readonly Row[]> {
     const compiled = compileState(this.state);
     try {
@@ -297,10 +321,12 @@ export class SelectQuery<Row, Refs extends AnyReferences> {
     }
   }
 
+  /** Runs the query with `LIMIT 1` and returns the first row, or `null` if none match. */
   async first(options: QueryOptions = {}): Promise<Row | null> {
     return (await this.limit(1).execute(options))[0] ?? null;
   }
 
+  /** Compiles the query once and returns a reusable {@link PreparedQuery} using a named prepared statement. */
   prepare(name: string): PreparedQuery<Row> {
     const compiled = compileState(this.state);
     return {
@@ -320,6 +346,7 @@ export class SelectQuery<Row, Refs extends AnyReferences> {
     };
   }
 
+  /** Compiles and runs the query, yielding rows as they arrive. Requires adapter streaming support. */
   stream(options: QueryOptions = {}): AsyncIterable<Row> {
     if (!this.adapter.stream) {
       throw new Error("This database adapter does not support streaming.");
@@ -370,6 +397,7 @@ type ExistingJoinRefs<Refs extends AnyReferences, Nullable extends boolean> = Nu
   ? NullableReferences<Refs>
   : Refs;
 
+/** A join with a target table chosen but no `ON` condition yet; returned by `SelectQuery`/`JoinedQuery` join methods. */
 export class PendingJoin<
   _Row,
   Refs extends AnyReferences,
@@ -393,6 +421,7 @@ export class PendingJoin<
     }
   }
 
+  /** Completes the join with an `ON` predicate, returning a {@link JoinedQuery}. */
   on(
     predicate: (
       refs: JoinedRefs<ExistingJoinRefs<Refs, ExistingNullable>, T, Alias, Nullable>,
@@ -414,12 +443,14 @@ export class PendingJoin<
   }
 }
 
+/** A query with one or more completed joins; supports further joins or a final `select()`. */
 export class JoinedQuery<Refs extends AnyReferences> {
   constructor(
     private readonly adapter: DatabaseAdapter,
     private readonly state: QueryState,
   ) {}
 
+  /** Sets the projected columns/expressions across the joined tables. */
   select<const S extends Selection>(
     projection: S | ((refs: Refs) => S),
   ): SelectQuery<SelectionResult<S>, Refs> {
@@ -430,6 +461,7 @@ export class JoinedQuery<Refs extends AnyReferences> {
     });
   }
 
+  /** Starts an additional `INNER JOIN`; call `.on(...)` on the result to complete it. */
   join<T extends AnyTable, A extends string = T["$name"]>(
     target: JoinTarget<T>,
     options: { readonly as?: A } = {},
@@ -437,6 +469,7 @@ export class JoinedQuery<Refs extends AnyReferences> {
     return new PendingJoin(this.adapter, this.state, target.definition, options.as, "INNER");
   }
 
+  /** Starts an additional `LEFT JOIN`; call `.on(...)` on the result to complete it. */
   leftJoin<T extends AnyTable, A extends string = T["$name"]>(
     target: JoinTarget<T>,
     options: { readonly as?: A } = {},
@@ -444,6 +477,7 @@ export class JoinedQuery<Refs extends AnyReferences> {
     return new PendingJoin(this.adapter, this.state, target.definition, options.as, "LEFT");
   }
 
+  /** Starts an additional `RIGHT JOIN`; call `.on(...)` on the result to complete it. */
   rightJoin<T extends AnyTable, A extends string = T["$name"]>(
     target: JoinTarget<T>,
     options: { readonly as?: A } = {},
@@ -451,6 +485,7 @@ export class JoinedQuery<Refs extends AnyReferences> {
     return new PendingJoin(this.adapter, this.state, target.definition, options.as, "RIGHT");
   }
 
+  /** Starts an additional `FULL JOIN`; call `.on(...)` on the result to complete it. */
   fullJoin<T extends AnyTable, A extends string = T["$name"]>(
     target: JoinTarget<T>,
     options: { readonly as?: A } = {},
@@ -459,12 +494,14 @@ export class JoinedQuery<Refs extends AnyReferences> {
   }
 }
 
+/** A query compiled once for repeated execution, using a named prepared statement server-side. */
 export interface PreparedQuery<Row> {
   readonly name: string;
   toSQL(): SqlQuery;
   execute(options?: QueryOptions): Promise<readonly Row[]>;
 }
 
+/** Builds the default `SelectQuery` (`SELECT * FROM <table>`) that {@link TableClient} query methods delegate to. */
 export function tableQuery<T extends AnyTable>(
   adapter: DatabaseAdapter,
   definition: T,
