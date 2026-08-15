@@ -34,6 +34,27 @@ export interface ReturningStatus {
   readonly returning?: "status";
 }
 
+const POSTGRES_PARAMETER_LIMIT = 65_535;
+
+function batchProperties(inputs: readonly Record<string, unknown>[]): string[] {
+  return [...new Set(inputs.flatMap((input) => Object.keys(input)))];
+}
+
+function effectiveBatchChunkSize(
+  configuredChunkSize: number,
+  propertyCount: number,
+  operation: "insertMany" | "upsertMany",
+): number {
+  if (propertyCount === 0) throw new Error(`${operation} rows require at least one value.`);
+  const parameterBound = Math.floor(POSTGRES_PARAMETER_LIMIT / propertyCount);
+  if (parameterBound < 1) {
+    throw new Error(
+      `${operation} rows contain ${propertyCount} values, exceeding PostgreSQL's ${POSTGRES_PARAMETER_LIMIT}-parameter statement limit.`,
+    );
+  }
+  return Math.min(configuredChunkSize, parameterBound);
+}
+
 type PrimaryKeyName<T extends AnyTable> = {
   [K in keyof T["$columns"]]: K extends keyof InferKey<T> ? K : never;
 }[keyof T["$columns"]];
@@ -262,8 +283,9 @@ export class TableClient<T extends AnyTable> {
   }
 
   /**
-   * Inserts many rows in chunks (default 1000 per statement, via `options.chunkSize`).
-   * Pass `{ returning: "rows" }` to get all inserted rows back.
+   * Inserts many rows in chunks (default 1000 per statement, via `options.chunkSize`), capped by
+   * row width so no statement exceeds PostgreSQL's 65,535 bind-parameter limit. Pass
+   * `{ returning: "rows" }` to get all inserted rows back.
    */
   async insertMany(
     inputs: readonly InferInsert<T>[],
@@ -280,14 +302,17 @@ export class TableClient<T extends AnyTable> {
     if (inputs.length === 0) return options.returning === "rows" ? [] : { rowsAffected: 0 };
     const chunkSize = options.chunkSize ?? 1000;
     if (!Number.isSafeInteger(chunkSize) || chunkSize < 1) throw new Error("Invalid chunkSize.");
+    const allProperties = batchProperties(inputs as readonly Record<string, unknown>[]);
+    const effectiveChunkSize = effectiveBatchChunkSize(
+      chunkSize,
+      allProperties.length,
+      "insertMany",
+    );
     let rowsAffected = 0;
     const rows: InferRow<T>[] = [];
-    for (let index = 0; index < inputs.length; index += chunkSize) {
-      const chunk = inputs.slice(index, index + chunkSize);
-      const properties = [
-        ...new Set(chunk.flatMap((input) => Object.keys(input as Record<string, unknown>))),
-      ];
-      if (properties.length === 0) throw new Error("insertMany rows require at least one value.");
+    for (let index = 0; index < inputs.length; index += effectiveChunkSize) {
+      const chunk = inputs.slice(index, index + effectiveChunkSize);
+      const properties = batchProperties(chunk as readonly Record<string, unknown>[]);
       const columns = properties.map((property) => {
         const column = this.definition.$columns[property];
         if (!column) throw new Error(`Unknown ${this.definition.$name} property ${property}.`);
@@ -396,7 +421,8 @@ export class TableClient<T extends AnyTable> {
 
   /**
    * Inserts many rows, updating non-primary-key columns on conflict (`ON CONFLICT ... DO UPDATE`),
-   * in chunks (default 1000 per statement, via `options.chunkSize`). Requires the table to have a
+   * in chunks (default 1000 per statement, via `options.chunkSize`) capped by row width so no
+   * statement exceeds PostgreSQL's 65,535 bind-parameter limit. Requires the table to have a
    * primary key.
    */
   async upsertMany(
@@ -422,11 +448,15 @@ export class TableClient<T extends AnyTable> {
     const returned: InferRow<T>[] = [];
     const chunkSize = options.chunkSize ?? 1000;
     if (!Number.isSafeInteger(chunkSize) || chunkSize < 1) throw new Error("Invalid chunkSize.");
-    for (let index = 0; index < inputs.length; index += chunkSize) {
-      const chunk = inputs.slice(index, index + chunkSize);
-      const properties = [
-        ...new Set(chunk.flatMap((input) => Object.keys(input as Record<string, unknown>))),
-      ];
+    const allProperties = batchProperties(inputs as readonly Record<string, unknown>[]);
+    const effectiveChunkSize = effectiveBatchChunkSize(
+      chunkSize,
+      allProperties.length,
+      "upsertMany",
+    );
+    for (let index = 0; index < inputs.length; index += effectiveChunkSize) {
+      const chunk = inputs.slice(index, index + effectiveChunkSize);
+      const properties = batchProperties(chunk as readonly Record<string, unknown>[]);
       const columns = properties.map((property) => {
         const column = this.definition.$columns[property];
         if (!column) throw new Error(`Unknown ${this.definition.$name} property ${property}.`);

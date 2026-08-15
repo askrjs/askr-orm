@@ -8,6 +8,7 @@ import type {
 } from "./adapter";
 import type { DatabaseToolingAdapter } from "./definition";
 import type { SqlQuery } from "./sql";
+import { normalizeDatabaseError, type DatabaseError } from "./errors";
 export { jsonb, postgresEnum, postgresType, timestampTz, bytea } from "./schema";
 
 const MIGRATION_LOCK_KEY = "4707438161740729";
@@ -25,6 +26,43 @@ function lazy(value: string | (() => string) | undefined, environment: string): 
   return result;
 }
 
+class CheckedOutClient {
+  private failure: DatabaseError | undefined;
+
+  private readonly onError = (error: Error): void => {
+    this.failure ??= normalizeDatabaseError(error);
+  };
+
+  constructor(private readonly client: PoolClient) {
+    client.on("error", this.onError);
+  }
+
+  assertHealthy(): void {
+    if (this.failure) throw this.failure;
+  }
+
+  async query(config: unknown): Promise<QueryResult> {
+    this.assertHealthy();
+    try {
+      const result = await this.client.query(config as never);
+      this.assertHealthy();
+      return result;
+    } catch (error) {
+      throw normalizeDatabaseError(error);
+    }
+  }
+
+  startStream<T>(query: T): T {
+    this.assertHealthy();
+    return this.client.query(query as never) as T;
+  }
+
+  release(): void {
+    this.client.off("error", this.onError);
+    this.client.release(this.failure);
+  }
+}
+
 class PgAdapter implements DatabaseAdapter {
   readonly identity: string;
   private closed = false;
@@ -32,7 +70,7 @@ class PgAdapter implements DatabaseAdapter {
     private readonly executor: { query(config: unknown): Promise<QueryResult> },
     identity: string,
     private readonly pool?: PoolType,
-    private readonly client?: PoolClient,
+    private readonly client?: CheckedOutClient,
     private readonly transactionDepth = 0,
   ) {
     this.identity = identity;
@@ -52,19 +90,21 @@ class PgAdapter implements DatabaseAdapter {
 
   async *stream<Row>(query: SqlQuery, options: QueryOptions = {}): AsyncIterable<Row> {
     if (options.signal?.aborted) throw options.signal.reason;
-    const owned = this.client ? undefined : await this.pool?.connect();
+    if (!this.client && !this.pool) throw new Error("PostgreSQL streaming requires a pool.");
+    const owned = this.client ? undefined : new CheckedOutClient(await this.pool!.connect());
     const client = this.client ?? owned;
     if (!client) throw new Error("PostgreSQL streaming requires a pinned client.");
     try {
       if (options.signal?.aborted) throw options.signal.reason;
       const { default: QueryStream } = await import("pg-query-stream");
       if (options.signal?.aborted) throw options.signal.reason;
-      const stream = client.query(new QueryStream(query.text, [...query.values]));
+      const stream = client.startStream(new QueryStream(query.text, [...query.values]));
       const abort = () => stream.destroy(options.signal?.reason);
       options.signal?.addEventListener("abort", abort, { once: true });
       if (options.signal?.aborted) abort();
       try {
         for await (const row of stream) yield row as Row;
+        client.assertHealthy();
       } finally {
         options.signal?.removeEventListener("abort", abort);
         stream.destroy();
@@ -84,7 +124,7 @@ class PgAdapter implements DatabaseAdapter {
       try {
         const value = await callback(
           new PgAdapter(
-            this.client as never,
+            this.client,
             this.identity,
             undefined,
             this.client,
@@ -94,13 +134,13 @@ class PgAdapter implements DatabaseAdapter {
         await this.client.query(`RELEASE SAVEPOINT ${savepoint}`);
         return value;
       } catch (error) {
-        await this.client.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
-        await this.client.query(`RELEASE SAVEPOINT ${savepoint}`);
+        await this.client.query(`ROLLBACK TO SAVEPOINT ${savepoint}`).catch(() => undefined);
+        await this.client.query(`RELEASE SAVEPOINT ${savepoint}`).catch(() => undefined);
         throw error;
       }
     }
     if (!this.client && !this.pool) throw new Error("PostgreSQL transactions require a pool.");
-    const owned = this.client ? undefined : await this.pool!.connect();
+    const owned = this.client ? undefined : new CheckedOutClient(await this.pool!.connect());
     const client = this.client ?? owned!;
     try {
       const clauses = [
@@ -110,13 +150,11 @@ class PgAdapter implements DatabaseAdapter {
         .filter(Boolean)
         .join(" ");
       await client.query(`BEGIN${clauses ? ` ${clauses}` : ""}`);
-      const value = await callback(
-        new PgAdapter(client as never, this.identity, undefined, client, 1),
-      );
+      const value = await callback(new PgAdapter(client, this.identity, undefined, client, 1));
       await client.query("COMMIT");
       return value;
     } catch (error) {
-      await client.query("ROLLBACK");
+      await client.query("ROLLBACK").catch(() => undefined);
       throw error;
     } finally {
       owned?.release();
@@ -126,9 +164,11 @@ class PgAdapter implements DatabaseAdapter {
   async session<T>(callback: (adapter: DatabaseAdapter) => Promise<T>): Promise<T> {
     if (this.client) return callback(this);
     if (!this.pool) throw new Error("PostgreSQL sessions require a pool.");
-    const client = await this.pool.connect();
+    const client = new CheckedOutClient(await this.pool.connect());
     try {
-      return await callback(new PgAdapter(client as never, this.identity, undefined, client));
+      const value = await callback(new PgAdapter(client, this.identity, undefined, client));
+      client.assertHealthy();
+      return value;
     } finally {
       client.release();
     }
@@ -194,7 +234,7 @@ async function pgTooling(
         .rows;
     },
     async describe(sql, parameterNames) {
-      const client = await pool.connect();
+      const client = new CheckedOutClient(await pool.connect());
       let prepared = false;
       try {
         await client.query(`PREPARE askr_describe AS ${sql}`);
