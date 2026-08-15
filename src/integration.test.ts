@@ -1,4 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
+import path from "node:path";
+import { promisify } from "node:util";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { DatabaseAdapter } from "./adapter";
@@ -8,6 +11,7 @@ import { createMigrationsApi, type MigrationManifest } from "./migrations";
 
 const databaseUrl = process.env.ASKR_ORM_TEST_DATABASE_URL;
 const integration = databaseUrl ? describe : describe.skip;
+const execFileAsync = promisify(execFile);
 
 const groups = table("orm_groups", {
   id: uuid().primaryKey(),
@@ -21,6 +25,21 @@ const users = table("orm_users", {
     .references(() => groups.id),
   createdAt: timestampTz().notNull().defaultNow(),
 });
+const wideColumns = Object.fromEntries(
+  Array.from({ length: 70 }, (_, index) => [
+    `value${index}`,
+    index === 0 ? text().primaryKey() : text().notNull(),
+  ]),
+);
+const wide = table("orm_wide", wideColumns);
+
+function createWideRows(prefix: string): Record<string, string>[] {
+  return Array.from({ length: 1000 }, (_, row) =>
+    Object.fromEntries(
+      Array.from({ length: 70 }, (_, column) => [`value${column}`, `${prefix}-${row}-${column}`]),
+    ),
+  );
+}
 
 integration("PostgreSQL adapter conformance", () => {
   const pool = new Pool({ connectionString: databaseUrl, max: 4 });
@@ -36,11 +55,15 @@ integration("PostgreSQL adapter conformance", () => {
     await pool.query(
       'CREATE TABLE "orm_users" ("id" uuid PRIMARY KEY DEFAULT gen_random_uuid(), "email" text NOT NULL UNIQUE, "group_id" uuid NOT NULL REFERENCES "orm_groups" ("id"), "created_at" timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP)',
     );
+    await pool.query('DROP TABLE IF EXISTS "orm_wide"');
+    await pool.query(
+      `CREATE TABLE "orm_wide" (${Array.from({ length: 70 }, (_, index) => `"value${index}" text ${index === 0 ? "PRIMARY KEY" : "NOT NULL"}`).join(", ")})`,
+    );
   });
 
   afterAll(async () => {
     await pool.query(
-      'DROP TABLE IF EXISTS "_askr_migrations", "orm_migration_probe", "orm_users", "orm_groups" CASCADE',
+      'DROP TABLE IF EXISTS "_askr_migrations", "orm_migration_probe", "orm_wide", "orm_users", "orm_groups" CASCADE',
     );
     await pool.end();
     await adapter.close?.();
@@ -96,6 +119,25 @@ integration("PostgreSQL adapter conformance", () => {
     expect(
       await db.users.where(({ orm_users: columns }) => eq(columns.email, email)).first(),
     ).toBeNull();
+  });
+
+  it("should reject a checked-out connection terminated while idle in a transaction", async () => {
+    const fixture = path.resolve("tests/fixtures/terminated-postgres-client.ts");
+    const result = await execFileAsync(process.execPath, ["--import", "tsx", fixture], {
+      env: { ...process.env, ASKR_ORM_TEST_DATABASE_URL: databaseUrl! },
+    });
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toMatch(/^caught:connection:57P01\n$/);
+  });
+
+  it("should insert and upsert real wide-table batches without overflowing bind parameters", async () => {
+    const wideDb = createDatabaseClient({ wide }, adapter);
+    await expect(wideDb.wide.insertMany(createWideRows("insert"))).resolves.toEqual({
+      rowsAffected: 1000,
+    });
+    await expect(wideDb.wide.upsertMany(createWideRows("upsert"))).resolves.toEqual({
+      rowsAffected: 1000,
+    });
   });
 
   it("should isolate nested savepoints and cancel cursor streams", async () => {
