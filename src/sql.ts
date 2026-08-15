@@ -2,6 +2,7 @@ import { quoteIdentifier } from "./naming";
 import type { DatabaseAdapter, QueryOptions } from "./adapter";
 import { normalizeDatabaseError } from "./errors";
 import type { AnyTable } from "./schema";
+import { rewriteStructuralSql } from "./placeholders";
 
 const SQL_FRAGMENT = Symbol("askr.sql.fragment");
 
@@ -57,12 +58,18 @@ export function identifier(name: string): SqlFragment {
   return fragment([{ kind: "identifier", value: name }]);
 }
 
-/** Embeds a value as a SQL literal (not a bound parameter). Also available as `sql.literal`. */
+/**
+ * Embeds a value as a SQL literal (not a bound parameter). Also available as `sql.literal`.
+ * @throws {RangeError} If a numeric value is not finite.
+ */
 export function literal(value: string | number | boolean | null): SqlFragment {
   if (typeof value === "string") {
     return fragment([{ kind: "text", value: `'${value.replaceAll("'", "''")}'` }]);
   }
   if (value === null) return fragment([{ kind: "text", value: "NULL" }]);
+  if (typeof value === "number" && !Number.isFinite(value)) {
+    throw new RangeError("SQL numeric literals require a finite number.");
+  }
   return fragment([{ kind: "text", value: String(value) }]);
 }
 
@@ -289,7 +296,10 @@ export function compileKeyedSql(
 ): SqlQuery {
   const ordered: unknown[] = [];
   const positions = new Map<string, number>();
-  const text = query.source.replace(/(?<!:):([a-z_][a-z0-9_]*)/gi, (_match, name: string) => {
+  const text = rewriteStructuralSql(query.source, (source, index) => {
+    const placeholder = source.slice(index).match(/^:([a-z_][a-z0-9_]*)/i);
+    if (!placeholder || source[index - 1] === ":") return undefined;
+    const name = placeholder[1]!;
     if (!(name in query.parameters)) {
       throw new Error(`Keyed SQL ${query.key} uses undeclared parameter :${name}.`);
     }
@@ -302,7 +312,7 @@ export function compileKeyedSql(
       position = ordered.length;
       positions.set(name, position);
     }
-    return `$${position}`;
+    return { text: `$${position}`, length: placeholder[0].length };
   });
   return { text, values: ordered };
 }

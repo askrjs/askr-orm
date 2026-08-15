@@ -3,12 +3,15 @@ export interface PlaceholderRewriteOptions {
   readonly sqlite?: boolean;
 }
 
-export function rewritePlaceholders(
+interface SqlStructuralReplacement {
+  readonly text: string;
+  readonly length: number;
+}
+
+export function rewriteStructuralSql(
   text: string,
-  values: readonly unknown[],
-  options: PlaceholderRewriteOptions,
-): { readonly text: string; readonly values: readonly unknown[] } {
-  const rewrittenValues: unknown[] = [];
+  replace: (source: string, index: number) => SqlStructuralReplacement | undefined,
+): string {
   let output = "";
   let index = 0;
   let quote: "'" | '"' | null = null;
@@ -59,8 +62,10 @@ export function rewritePlaceholders(
       blockComment = true;
       continue;
     }
-    if (options.sqlite && text.startsWith('"public".', index)) {
-      index += 9;
+    const replacement = replace(text, index);
+    if (replacement) {
+      output += replacement.text;
+      index += replacement.length;
       continue;
     }
     const character = text[index]!;
@@ -71,21 +76,6 @@ export function rewritePlaceholders(
       continue;
     }
     if (character === "$") {
-      const placeholder = text.slice(index).match(/^\$(\d+)/);
-      if (placeholder) {
-        const position = Number(placeholder[1]);
-        if (position < 1 || position > values.length) {
-          throw new Error(`SQL placeholder $${position} has no matching value.`);
-        }
-        if (options.sqlite) {
-          output += "?";
-          rewrittenValues.push(values[position - 1]);
-        } else {
-          output += `$${position + (options.offset ?? 0)}`;
-        }
-        index += placeholder[0].length;
-        continue;
-      }
       const delimiter = text.slice(index).match(/^\$[A-Za-z_][A-Za-z0-9_]*\$|^\$\$/)?.[0];
       if (delimiter) {
         dollarQuote = delimiter;
@@ -97,6 +87,31 @@ export function rewritePlaceholders(
     output += character;
     index += 1;
   }
+  return output;
+}
+
+export function rewritePlaceholders(
+  text: string,
+  values: readonly unknown[],
+  options: PlaceholderRewriteOptions,
+): { readonly text: string; readonly values: readonly unknown[] } {
+  const rewrittenValues: unknown[] = [];
+  const output = rewriteStructuralSql(text, (source, index) => {
+    if (options.sqlite && source.startsWith('"public".', index)) {
+      return { text: "", length: 9 };
+    }
+    const placeholder = source.slice(index).match(/^\$(\d+)/);
+    if (!placeholder) return undefined;
+    const position = Number(placeholder[1]);
+    if (position < 1 || position > values.length) {
+      throw new Error(`SQL placeholder $${position} has no matching value.`);
+    }
+    if (options.sqlite) rewrittenValues.push(values[position - 1]);
+    return {
+      text: options.sqlite ? "?" : `$${position + (options.offset ?? 0)}`,
+      length: placeholder[0].length,
+    };
+  });
   return { text: output, values: options.sqlite ? rewrittenValues : values };
 }
 
