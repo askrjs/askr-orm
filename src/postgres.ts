@@ -12,6 +12,7 @@ export { jsonb, postgresEnum, postgresType, timestampTz, bytea } from "./schema"
 
 const MIGRATION_LOCK_KEY = "4707438161740729";
 
+/** Options accepted by {@link postgres}. */
 export interface PostgresOptions {
   readonly url?: string | (() => string);
   readonly shadowUrl?: string | (() => string);
@@ -210,6 +211,12 @@ async function pgTooling(
   };
 }
 
+/**
+ * Creates a PostgreSQL {@link DatabaseDriver} backed by `pg`, connecting to `options.url`
+ * (defaulting to `DATABASE_URL`). Requires the optional peers `pg` and `pg-query-stream`; the
+ * shadow database (for migration tooling) uses `options.shadowUrl`/`DATABASE_SHADOW_URL` and
+ * must differ from the target.
+ */
 export function postgres(options: PostgresOptions = {}): DatabaseDriver {
   return {
     dialect: "postgres",

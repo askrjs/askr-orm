@@ -17,17 +17,20 @@ import type {
   ViewDefinition,
 } from "./schema";
 
+/** Output sink used by {@link runDatabaseCli} for logging and errors. */
 export interface DatabaseCliIo {
   log(message?: unknown): void;
   error(message?: unknown): void;
 }
 
+/** Options accepted by {@link runDatabaseCli}. */
 export interface RunDatabaseCliOptions {
   readonly cwd?: string;
   readonly io?: DatabaseCliIo;
   readonly confirm?: (message: string) => Promise<boolean>;
 }
 
+/** Serialized column shape stored in a {@link SchemaSnapshot}. */
 export interface SnapshotColumn extends Omit<ColumnAst, "codec" | "references" | "property"> {
   /** Accepted only when reading a legacy snapshot; live definitions cannot declare drops. */
   readonly drop?: boolean;
@@ -40,6 +43,7 @@ export interface SnapshotColumn extends Omit<ColumnAst, "codec" | "references" |
   readonly codec?: string;
 }
 
+/** Serialized table shape stored in a {@link SchemaSnapshot}. */
 export interface SnapshotTable {
   readonly schema: string;
   readonly name: string;
@@ -50,6 +54,7 @@ export interface SnapshotTable {
   readonly constraints: readonly TableConstraint[];
 }
 
+/** Point-in-time serialized shape of a database schema, produced by {@link snapshotDefinition}. */
 export interface SchemaSnapshot {
   readonly version: 1;
   readonly enums: readonly {
@@ -122,6 +127,7 @@ function findOwningTableName(column: object): string | undefined {
   return columnOwners.get(column)?.table;
 }
 
+/** Serializes a live {@link DatabaseDefinition} into a {@link SchemaSnapshot} for diffing/persistence. */
 export function snapshotDefinition(
   definition: DatabaseDefinition<
     Record<string, AnyTable>,
@@ -294,6 +300,10 @@ function byName<T extends { readonly schema: string; readonly name: string }>(
   return new Map(values.map((value) => [`${value.schema}.${value.name}`, value]));
 }
 
+/**
+ * Generates a migration's SQL by diffing a `current` schema snapshot against a `desired` one
+ * (an empty `current` produces the full initial-schema SQL instead of a diff).
+ */
 export function diffSnapshots(
   current: SchemaSnapshot,
   desiredInput: SchemaSnapshot,
@@ -918,6 +928,13 @@ async function targetAdapter(database: LoadedDatabase): Promise<DatabaseAdapter>
   return adapter;
 }
 
+/**
+ * Runs the `askr-orm` database CLI (validate, generate, migration create/status/plan/apply/resolve)
+ * against the databases discovered under `options.cwd`, writing results via `options.io`.
+ *
+ * @param args CLI arguments, e.g. `["migration", "apply", "--yes"]`.
+ * @returns The process exit code: `0` on success, `1` on error.
+ */
 export async function runDatabaseCli(
   args: readonly string[],
   options: RunDatabaseCliOptions = {},
@@ -1045,6 +1062,7 @@ export async function runDatabaseCli(
   }
 }
 
+/** Checks whether a discoverable database entry file exists under `cwd`. */
 export async function hasDatabaseEntry(cwd: string): Promise<boolean> {
   return findDatabaseEntry(cwd).then(
     () => true,
@@ -1052,6 +1070,7 @@ export async function hasDatabaseEntry(cwd: string): Promise<boolean> {
   );
 }
 
+/** Runs `askr-orm validate` against the database(s) discovered under `cwd`, capturing its output. */
 export async function validateDiscoveredDatabase(cwd: string): Promise<{
   readonly status: "passed" | "failed";
   readonly stdout: string;

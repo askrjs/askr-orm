@@ -100,6 +100,7 @@ const RESERVED = new Set([
   "with",
 ]);
 
+/** Converts camelCase/kebab-case/space-separated text to snake_case, e.g. for default column names. */
 export function toSnakeCase(value: string): string {
   return value
     .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
@@ -108,11 +109,22 @@ export function toSnakeCase(value: string): string {
     .toLowerCase();
 }
 
+/**
+ * Wraps a SQL identifier in double quotes, escaping any embedded quotes.
+ *
+ * @throws If `value` is empty or contains a NUL byte.
+ */
 export function quoteIdentifier(value: string): string {
   if (!value || value.includes("\0")) throw new Error("SQL identifiers must be non-empty.");
   return `"${value.replaceAll('"', '""')}"`;
 }
 
+/**
+ * Validates that an identifier is safe to embed unquoted in SQL: alphanumeric/underscore,
+ * not starting with a digit, and not a reserved word.
+ *
+ * @throws If the identifier fails validation.
+ */
 export function assertSafeIdentifier(value: string): void {
   if (!/^[a-z_][a-z0-9_]*$/i.test(value) || RESERVED.has(value.toLowerCase())) {
     throw new Error(`Unsafe or reserved unquoted SQL identifier: ${value}`);

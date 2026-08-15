@@ -14,18 +14,22 @@ import type { SqlQuery } from "./sql";
 import { createMigrationsApi, type MigrationManifest, type MigrationsApi } from "./migrations";
 import type { RegisteredQuery } from "./registered-query";
 
+/** Outcome of a write operation that did not request rows back. */
 export interface WriteResult {
   readonly rowsAffected: number;
 }
 
+/** Option marker requesting that a write operation return the single affected row. */
 export interface ReturningRow {
   readonly returning: "row";
 }
 
+/** Option marker requesting that a write operation return all affected rows. */
 export interface ReturningRows {
   readonly returning: "rows";
 }
 
+/** Option marker requesting only a {@link WriteResult} status, without returned rows (the default). */
 export interface ReturningStatus {
   readonly returning?: "status";
 }
@@ -129,6 +133,11 @@ async function execute(
   return result;
 }
 
+/**
+ * Typed CRUD and query surface for a single table, backed by a {@link DatabaseAdapter}.
+ * Instances are created internally by {@link createDatabaseClient}; the select-query
+ * methods delegate to a fresh {@link SelectQuery} for that table.
+ */
 export class TableClient<T extends AnyTable> {
   readonly definition: T;
 
@@ -177,14 +186,17 @@ export class TableClient<T extends AnyTable> {
   stream: SelectQuery<InferRow<T>, References<T, T["$name"]>>["stream"] = (options) =>
     this.query().stream(options);
 
+  /** Compiles the default `SELECT * FROM <table>` query to SQL without executing it. */
   toSQL(): SqlQuery {
     return this.query().toSQL();
   }
 
+  /** Fetches every row in the table. */
   all(options?: QueryOptions): Promise<readonly InferRow<T>[]> {
     return this.query().execute(options);
   }
 
+  /** Fetches a single row by primary key, or `null` if no row matches. */
   async get(key: PrimaryKeyInput<T>, options: QueryOptions = {}): Promise<InferRow<T> | null> {
     const where = whereKey(this.definition, key, 1);
     const query = {
@@ -202,6 +214,7 @@ export class TableClient<T extends AnyTable> {
     return row ? decodeRow(this.definition, row) : null;
   }
 
+  /** Inserts a single row. Pass `{ returning: "row" }` to get the inserted row back. */
   async insert(
     input: InferInsert<T>,
     options?: ReturningStatus & QueryOptions,
@@ -248,6 +261,10 @@ export class TableClient<T extends AnyTable> {
     return decodeRow(this.definition, row);
   }
 
+  /**
+   * Inserts many rows in chunks (default 1000 per statement, via `options.chunkSize`).
+   * Pass `{ returning: "rows" }` to get all inserted rows back.
+   */
   async insertMany(
     inputs: readonly InferInsert<T>[],
     options: (ReturningStatus | ReturningRows) &
@@ -308,6 +325,7 @@ export class TableClient<T extends AnyTable> {
     return options.returning === "rows" ? rows : { rowsAffected };
   }
 
+  /** Updates the row matching the primary key with the given patch. */
   async update(
     key: PrimaryKeyInput<T>,
     patch: InferPatch<T>,
@@ -360,6 +378,7 @@ export class TableClient<T extends AnyTable> {
     return row ? decodeRow(this.definition, row) : null;
   }
 
+  /** Deletes the row matching the primary key. */
   async delete(key: PrimaryKeyInput<T>, options: QueryOptions = {}): Promise<WriteResult> {
     const where = whereKey(this.definition, key, 1);
     const result = await execute(
@@ -375,6 +394,11 @@ export class TableClient<T extends AnyTable> {
     return { rowsAffected: result.rowCount };
   }
 
+  /**
+   * Inserts many rows, updating non-primary-key columns on conflict (`ON CONFLICT ... DO UPDATE`),
+   * in chunks (default 1000 per statement, via `options.chunkSize`). Requires the table to have a
+   * primary key.
+   */
   async upsertMany(
     inputs: readonly InferInsert<T>[],
     options: QueryOptions & {
@@ -450,6 +474,7 @@ export class TableClient<T extends AnyTable> {
     return options.returning === "rows" ? returned : { rowsAffected };
   }
 
+  /** Inserts a single row, updating non-primary-key columns on conflict. See {@link upsertMany}. */
   async upsert(
     input: InferInsert<T>,
     options: QueryOptions & { readonly returning?: "status" | "row" } = {},
@@ -472,6 +497,7 @@ export class TableClient<T extends AnyTable> {
   }
 }
 
+/** Maps each table in a schema record to its corresponding {@link TableClient}. */
 export type DatabaseTables<T extends Record<string, AnyTable>> = {
   readonly [K in keyof T]: TableClient<T[K]>;
 };
@@ -482,6 +508,10 @@ type QueryFunctions<Q extends Record<string, RegisteredQuery<Record<string, unkn
     : never;
 };
 
+/**
+ * Full client returned by {@link createDatabaseClient}: a {@link TableClient} per table, callable
+ * registered queries, a migrations API, transaction support, and connection close.
+ */
 export type DatabaseClient<
   T extends Record<string, AnyTable>,
   Q extends Record<string, RegisteredQuery<Record<string, unknown>>> = Record<never, never>,
@@ -495,6 +525,16 @@ export type DatabaseClient<
   close(): Promise<void>;
 };
 
+/**
+ * Builds a {@link DatabaseClient} exposing one {@link TableClient} per table, the given
+ * registered queries as callable functions, a migrations API, and transaction support.
+ *
+ * @param tables Table definitions, keyed by the name used on the resulting client.
+ * @param adapter Low-level connection to run queries against.
+ * @param manifest Bundled migrations exposed through `client.migrations`.
+ * @param options Open options (e.g. telemetry).
+ * @param registeredQueries Precompiled queries (see {@link defineQuery}) exposed as `client.queries`.
+ */
 export function createDatabaseClient<
   T extends Record<string, AnyTable>,
   Q extends Record<string, RegisteredQuery<Record<string, unknown>>> = Record<never, never>,

@@ -1,6 +1,7 @@
 import type { DatabaseAdapter, QueryOptions } from "./adapter";
 import { normalizeDatabaseError } from "./errors";
 
+/** A single migration bundled into a {@link MigrationManifest} by codegen. */
 export interface BundledMigration {
   readonly id: string;
   readonly parent: string | null;
@@ -10,10 +11,12 @@ export interface BundledMigration {
   readonly risk?: "safe" | "review" | "destructive";
 }
 
+/** Ordered chain of migrations bundled with a database definition. */
 export interface MigrationManifest {
   readonly migrations: readonly BundledMigration[];
 }
 
+/** A migration's recorded state in the database's migration ledger. */
 export interface AppliedMigration {
   readonly id: string;
   readonly parent: string | null;
@@ -24,32 +27,41 @@ export interface AppliedMigration {
   readonly durationMs: number | null;
 }
 
+/** A bundled migration not yet applied, as returned in a {@link MigrationPlan}. */
 export interface MigrationPlanEntry extends BundledMigration {
   readonly status: "pending";
 }
 
+/** Comparison of the bundled manifest against the database's applied migration history. */
 export interface MigrationPlan {
   readonly applied: readonly AppliedMigration[];
   readonly pending: readonly MigrationPlanEntry[];
 }
 
+/** Progress notification emitted during {@link MigrationsApi.apply}. */
 export interface MigrationEvent {
   readonly type: "lock-acquired" | "started" | "applied" | "failed" | "complete";
   readonly migration?: string;
   readonly durationMs?: number;
 }
 
+/** Options for {@link MigrationsApi.apply}. */
 export interface MigrationApplyOptions extends QueryOptions {
   readonly onEvent?: (event: MigrationEvent) => void;
 }
 
+/** Result of {@link MigrationsApi.apply}: the ids of migrations applied during that call. */
 export interface MigrationApplyResult {
   readonly applied: readonly string[];
 }
 
+/** Migration operations exposed on `client.migrations`. */
 export interface MigrationsApi {
+  /** Compares bundled migrations against applied history without changing the database. */
   plan(options?: QueryOptions): Promise<MigrationPlan>;
+  /** Acquires the migration lock and applies all pending migrations in order. */
   apply(options?: MigrationApplyOptions): Promise<MigrationApplyResult>;
+  /** Marks a failed or stuck-applying migration as applied or rolled back. */
   resolve(id: string, resolution: "applied" | "rolled-back", options?: QueryOptions): Promise<void>;
 }
 

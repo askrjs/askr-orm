@@ -5,11 +5,13 @@ import type { AnyTable } from "./schema";
 
 const SQL_FRAGMENT = Symbol("askr.sql.fragment");
 
+/** Compiled, ready-to-execute SQL: parameterized text plus the ordered bind values. */
 export interface SqlQuery {
   readonly text: string;
   readonly values: readonly unknown[];
 }
 
+/** An uncompiled piece of SQL built with {@link sql}, compiled via {@link compileSql}. */
 export interface SqlFragment<T = unknown> {
   readonly [SQL_FRAGMENT]: true;
   readonly chunks: readonly SqlChunk[];
@@ -22,6 +24,7 @@ type SqlChunk =
   | { readonly kind: "identifier"; readonly value: string }
   | { readonly kind: "fragment"; readonly value: SqlFragment };
 
+/** A named SQL template with `:named` parameters, built with `sql.key(...)`. See {@link compileKeyedSql}. */
 export interface KeyedSql<TParameters extends Record<string, unknown>, TResult> {
   readonly kind: "keyed-sql";
   readonly key: string;
@@ -30,6 +33,7 @@ export interface KeyedSql<TParameters extends Record<string, unknown>, TResult> 
   readonly result?: TResult;
 }
 
+/** Raw SQL text inserted verbatim (not as a bound parameter) by {@link unsafeSql}. */
 export interface UnsafeSql {
   readonly kind: "unsafe-sql";
   readonly text: string;
@@ -48,10 +52,12 @@ function isFragment(value: unknown): value is SqlFragment {
   );
 }
 
+/** Embeds `name` as a quoted SQL identifier (not a bound parameter). Also available as `sql.identifier`. */
 export function identifier(name: string): SqlFragment {
   return fragment([{ kind: "identifier", value: name }]);
 }
 
+/** Embeds a value as a SQL literal (not a bound parameter). Also available as `sql.literal`. */
 export function literal(value: string | number | boolean | null): SqlFragment {
   if (typeof value === "string") {
     return fragment([{ kind: "text", value: `'${value.replaceAll("'", "''")}'` }]);
@@ -60,6 +66,7 @@ export function literal(value: string | number | boolean | null): SqlFragment {
   return fragment([{ kind: "text", value: String(value) }]);
 }
 
+/** Wraps raw SQL text to be inserted verbatim into a query. Also available as `sql.unsafe`. */
 export function unsafeSql(text: string): UnsafeSql {
   return { kind: "unsafe-sql", text };
 }
@@ -116,6 +123,11 @@ function keyedSql<TParameters extends Record<string, unknown>, TResult = unknown
   };
 }
 
+/**
+ * Tagged template for building a {@link SqlFragment}: interpolated fragments splice in, other
+ * values become bound parameters. Also exposes `sql.identifier`, `sql.literal`, `sql.unsafe`,
+ * and `sql.key` for keyed/named-parameter queries.
+ */
 export const sql: SqlTag = Object.assign(sqlTag, {
   identifier,
   literal,
@@ -123,6 +135,7 @@ export const sql: SqlTag = Object.assign(sqlTag, {
   key: keyedSql,
 });
 
+/** Compiles a {@link SqlFragment} tree into parameterized SQL text and an ordered values array. */
 export function compileSql(value: SqlFragment): SqlQuery {
   const values: unknown[] = [];
   let text = "";
@@ -140,6 +153,7 @@ export function compileSql(value: SqlFragment): SqlQuery {
   return { text, values };
 }
 
+/** A reference to `tableAlias.columnName`, as produced by {@link tableRefs} for query builders. */
 export interface ColumnRef<T = unknown> {
   readonly kind: "column-ref";
   readonly tableAlias: string;
@@ -147,8 +161,10 @@ export interface ColumnRef<T = unknown> {
   readonly value?: T;
 }
 
+/** Anything usable as a query expression: a {@link SqlFragment} or a {@link ColumnRef}. */
 export type Expression<T = unknown> = SqlFragment<T> | ColumnRef<T>;
 
+/** Builds a {@link ColumnRef} to `tableAlias.columnName`. */
 export function columnRef<T>(tableAlias: string, columnName: string): ColumnRef<T> {
   return { kind: "column-ref", tableAlias, columnName };
 }
@@ -174,39 +190,53 @@ function binary<T>(
   return sql<boolean>`${expressionSql(left)} ${sql.unsafe(operator)} ${expressionSql(right)}`;
 }
 
+/** Builds an `=` comparison predicate. */
 export const eq = <T>(left: Expression<T>, right: Expression<T> | T): SqlFragment<boolean> =>
   binary(left, "=", right);
+/** Builds a `<>` comparison predicate. */
 export const ne = <T>(left: Expression<T>, right: Expression<T> | T): SqlFragment<boolean> =>
   binary(left, "<>", right);
+/** Builds a `>` comparison predicate. */
 export const gt = <T>(left: Expression<T>, right: Expression<T> | T): SqlFragment<boolean> =>
   binary(left, ">", right);
+/** Builds a `>=` comparison predicate. */
 export const gte = <T>(left: Expression<T>, right: Expression<T> | T): SqlFragment<boolean> =>
   binary(left, ">=", right);
+/** Builds a `<` comparison predicate. */
 export const lt = <T>(left: Expression<T>, right: Expression<T> | T): SqlFragment<boolean> =>
   binary(left, "<", right);
+/** Builds a `<=` comparison predicate. */
 export const lte = <T>(left: Expression<T>, right: Expression<T> | T): SqlFragment<boolean> =>
   binary(left, "<=", right);
+/** Builds a `LIKE` predicate. */
 export const like = (left: Expression<string>, pattern: string): SqlFragment<boolean> =>
   binary(left, "LIKE", pattern);
+/** Builds an `ILIKE` predicate. PostgreSQL only. */
 export const ilike = (left: Expression<string>, pattern: string): SqlFragment<boolean> =>
   binary(left, "ILIKE", pattern);
+/** Builds an `IS NULL` predicate. */
 export const isNull = (value: Expression): SqlFragment<boolean> =>
   sql<boolean>`${expressionSql(value)} IS NULL`;
+/** Builds an `IS NOT NULL` predicate. */
 export const isNotNull = (value: Expression): SqlFragment<boolean> =>
   sql<boolean>`${expressionSql(value)} IS NOT NULL`;
 
+/** Combines predicates with `AND`, parenthesized as a single expression. */
 export function and(...predicates: readonly SqlFragment<boolean>[]): SqlFragment<boolean> {
   return joinFragments(predicates, " AND ", true) as SqlFragment<boolean>;
 }
 
+/** Combines predicates with `OR`, parenthesized as a single expression. */
 export function or(...predicates: readonly SqlFragment<boolean>[]): SqlFragment<boolean> {
   return joinFragments(predicates, " OR ", true) as SqlFragment<boolean>;
 }
 
+/** Negates a predicate with `NOT (...)`. */
 export function not(predicate: SqlFragment<boolean>): SqlFragment<boolean> {
   return sql<boolean>`NOT (${predicate})`;
 }
 
+/** Builds an `IN (...)` predicate; returns a `FALSE` predicate for an empty array. */
 export function inArray<T>(value: Expression<T>, values: readonly T[]): SqlFragment<boolean> {
   if (values.length === 0) return sql<boolean>`FALSE`;
   return sql<boolean>`${expressionSql(value)} IN (${joinFragments(
@@ -215,6 +245,7 @@ export function inArray<T>(value: Expression<T>, values: readonly T[]): SqlFragm
   )})`;
 }
 
+/** Joins fragments with `separator`, optionally wrapping the result in parentheses. */
 export function joinFragments(
   fragments: readonly SqlFragment[],
   separator: string,
@@ -229,12 +260,14 @@ export function joinFragments(
   return parentheses ? sql`(${joined})` : joined;
 }
 
+/** A {@link ColumnRef} for every column of a table, keyed by property name. */
 export type TableRefs<T extends AnyTable> = {
   readonly [K in keyof T["$columns"]]: ColumnRef<
     T["$columns"][K] extends { readonly value?: infer V } ? V : unknown
   >;
 };
 
+/** Builds {@link ColumnRef}s for every column of `table`, aliased to `alias` (default: the table name). */
 export function tableRefs<T extends AnyTable>(table: T, alias = table.$name): TableRefs<T> {
   return Object.fromEntries(
     Object.entries(table.$columns).map(([property, value]) => [
@@ -244,6 +277,12 @@ export function tableRefs<T extends AnyTable>(table: T, alias = table.$name): Ta
   ) as TableRefs<T>;
 }
 
+/**
+ * Compiles a {@link KeyedSql} template by substituting its `:named` parameters with `values`,
+ * producing positional `$n` placeholders.
+ *
+ * @throws If a `:name` in the SQL text is not declared, or a declared parameter has no value.
+ */
 export function compileKeyedSql(
   query: KeyedSql<Record<string, unknown>, unknown>,
   values: Record<string, unknown>,
@@ -268,6 +307,7 @@ export function compileKeyedSql(
   return { text, values: ordered };
 }
 
+/** Compiles and executes a {@link KeyedSql} query, using its key as the prepared statement name. */
 export async function executeKeyedSql<TParameters extends Record<string, unknown>, TResult>(
   adapter: DatabaseAdapter,
   query: KeyedSql<TParameters, TResult>,

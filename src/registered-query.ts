@@ -1,6 +1,7 @@
 import type { QueryOptions } from "./adapter";
 import type { SqlQuery } from "./sql";
 
+/** A precompiled, named SQL query template produced by {@link defineQuery}. */
 export interface RegisteredQuery<
   Params extends Record<string, unknown>,
   Row = Record<string, unknown>,
@@ -14,11 +15,19 @@ export interface RegisteredQuery<
   readonly _row?: Row;
 }
 
+/** Shape of the callable exposed on `client.queries[name]` for a {@link RegisteredQuery}. */
 export type RegisteredQueryFunction<P extends Record<string, unknown>, Row> = (
   params: P,
   options?: QueryOptions,
 ) => Promise<readonly Row[]>;
 
+/**
+ * Creates a tagged-template builder for a named, parameterized SQL query. The returned function
+ * is used as a template tag, e.g. `defineQuery<Params>("byId")\`SELECT * FROM t WHERE id = ${"id"}\``,
+ * where interpolated values must be parameter names from `Params`.
+ *
+ * @throws If `key` is empty, or a template substitution is not a parameter name.
+ */
 export function defineQuery<Params extends Record<string, unknown>>(key: string) {
   if (!key.trim()) throw new Error("Registered query keys cannot be empty.");
   return (strings: TemplateStringsArray, ...parameters: readonly (keyof Params & string)[]) => {
