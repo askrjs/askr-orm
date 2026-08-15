@@ -35,6 +35,22 @@ const users = table("users", {
   groupId: uuid().notNull(),
 });
 
+const wideColumns = Object.fromEntries(
+  Array.from({ length: 70 }, (_, index) => [
+    `value${index}`,
+    index === 0 ? text().primaryKey() : text().notNull(),
+  ]),
+);
+const wide = table("wide", wideColumns);
+
+function wideRows(prefix: string): Record<string, string>[] {
+  return Array.from({ length: 1000 }, (_, row) =>
+    Object.fromEntries(
+      Array.from({ length: 70 }, (_, column) => [`value${column}`, `${prefix}-${row}-${column}`]),
+    ),
+  );
+}
+
 describe("database client", () => {
   it("should use status-first CRUD and explicit returning", async () => {
     const adapter = new RecordingAdapter();
@@ -67,6 +83,20 @@ describe("database client", () => {
       transaction.users.insert({ email: "three@example.com", groupId: "g" }),
     );
     expect(adapter.transactions).toBe(1);
+  });
+
+  it("should keep insertMany and upsertMany chunks within the PostgreSQL parameter limit", async () => {
+    const adapter = new RecordingAdapter();
+    const db = createDatabaseClient({ wide }, adapter);
+
+    await db.wide.insertMany(wideRows("insert"));
+    await db.wide.upsertMany(wideRows("upsert"));
+
+    expect(adapter.queries).toHaveLength(4);
+    expect(adapter.queries.every((query) => query.values.length <= 65_535)).toBe(true);
+    expect(adapter.queries.map((query) => query.values.length)).toEqual([
+      65_520, 4480, 65_520, 4480,
+    ]);
   });
 
   it("should require explicit join projection and compile null-safe left joins", () => {

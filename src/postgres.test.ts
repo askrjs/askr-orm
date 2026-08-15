@@ -4,6 +4,7 @@ const state = vi.hoisted(() => ({
   statements: [] as string[],
   ends: 0,
   releases: 0,
+  clientErrorListeners: new Set<(error: Error) => void>(),
 }));
 
 vi.mock("pg", () => {
@@ -16,6 +17,12 @@ vi.mock("pg", () => {
     async connect() {
       return {
         query: (config: string | { text?: string }) => this.query(config),
+        on: (event: string, listener: (error: Error) => void) => {
+          if (event === "error") state.clientErrorListeners.add(listener);
+        },
+        off: (event: string, listener: (error: Error) => void) => {
+          if (event === "error") state.clientErrorListeners.delete(listener);
+        },
         release: () => {
           state.releases += 1;
         },
@@ -43,6 +50,7 @@ describe("PostgreSQL adapter", () => {
     state.statements.length = 0;
     state.ends = 0;
     state.releases = 0;
+    state.clientErrorListeners.clear();
   });
 
   it("should deallocate described statements and support repeated description", async () => {
@@ -66,5 +74,22 @@ describe("PostgreSQL adapter", () => {
     await adapter.close?.();
     await adapter.close?.();
     expect(state.ends).toBe(1);
+  });
+
+  it("should normalize a checked-out client error and remove its listener on release", async () => {
+    const adapter = await postgres({
+      url: "postgres://target",
+      shadowUrl: "postgres://shadow",
+    }).open();
+
+    await expect(
+      adapter.transaction(async (transaction) => {
+        const error = Object.assign(new Error("connection terminated"), { code: "57P01" });
+        for (const listener of state.clientErrorListeners) listener(error);
+        await transaction.execute({ text: "SELECT 1", values: [] });
+      }),
+    ).rejects.toMatchObject({ category: "connection", code: "57P01" });
+    expect(state.clientErrorListeners).toHaveLength(0);
+    expect(state.releases).toBe(1);
   });
 });
