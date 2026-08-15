@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { and, compileKeyedSql, compileSql, eq, identifier, inArray, sql } from "./index";
+import { and, compileKeyedSql, compileSql, eq, identifier, inArray, literal, sql } from "./index";
 import { rewritePlaceholders, sqlStructure } from "./placeholders";
 
 describe("SQL boundaries", () => {
@@ -46,5 +46,36 @@ describe("SQL boundaries", () => {
       values: ["a@example.com"],
     });
     expect(() => sql.key("bad key", {})``).toThrow(/Invalid keyed SQL key/);
+  });
+
+  it("should replace only structural named parameters given inert SQL regions", () => {
+    let seed = 0x5eed;
+    for (let sample = 0; sample < 100; sample += 1) {
+      seed = (seed * 16_807) % 2_147_483_647;
+      const name = `p_${seed.toString(36)}`;
+      const inert = `:${name}`;
+      const source = [
+        `SELECT '${inert}', "quoted ${inert}", $$${inert}$$, $tag$${inert}$tag$`,
+        `-- ${inert}`,
+        `/* ${inert} */ WHERE id = :${name}`,
+      ].join("\n");
+      const query = {
+        kind: "keyed-sql" as const,
+        key: `guardrail.${sample}`,
+        source,
+        parameters: { [name]: 0 },
+      };
+
+      expect(compileKeyedSql(query, { [name]: sample })).toEqual({
+        text: source.replace(`WHERE id = :${name}`, "WHERE id = $1"),
+        values: [sample],
+      });
+    }
+  });
+
+  it("should reject non-finite numbers given SQL literal formatting", () => {
+    for (const value of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      expect(() => compileSql(sql`SELECT ${literal(value)}`)).toThrow(/finite number/i);
+    }
   });
 });
