@@ -19,8 +19,11 @@ export interface SqliteOptions {
 
 interface QueueContext {
   readonly adapter: SqliteAdapter;
+  readonly nestedQueue: SqliteQueue;
 }
 const context = new AsyncLocalStorage<QueueContext>();
+
+const sharedQueues = new Map<string, { queue: SqliteQueue; users: number }>();
 
 function sqliteQuery(query: SqlQuery): SqlQuery {
   return rewritePlaceholders(query.text, query.values, { sqlite: true });
@@ -60,6 +63,7 @@ class SqliteAdapter implements DatabaseAdapter {
     private readonly database: DatabaseSync,
     identity: string,
     queue = new SqliteQueue(),
+    private readonly releaseQueue = () => undefined,
   ) {
     this.identity = identity;
     this.queue = queue;
@@ -111,9 +115,16 @@ class SqliteAdapter implements DatabaseAdapter {
     callback: (adapter: DatabaseAdapter) => Promise<T>,
     _options?: TransactionOptions,
   ): Promise<T> {
-    if (context.getStore()?.adapter === this) return this.nested(callback);
+    const current = context.getStore();
+    if (current?.adapter === this) {
+      return current.nestedQueue.run(() =>
+        context.run({ adapter: this, nestedQueue: new SqliteQueue() }, () =>
+          this.nested(callback),
+        ),
+      );
+    }
     return this.queue.run(() =>
-      context.run({ adapter: this }, async () => {
+      context.run({ adapter: this, nestedQueue: new SqliteQueue() }, async () => {
         this.database.exec("BEGIN");
         try {
           const result = await callback(this);
@@ -129,7 +140,9 @@ class SqliteAdapter implements DatabaseAdapter {
 
   session<T>(callback: (adapter: DatabaseAdapter) => Promise<T>): Promise<T> {
     if (context.getStore()?.adapter === this) return callback(this);
-    return this.queue.run(() => context.run({ adapter: this }, () => callback(this)));
+    return this.queue.run(() =>
+      context.run({ adapter: this, nestedQueue: new SqliteQueue() }, () => callback(this)),
+    );
   }
 
   migrationLock<T>(callback: (adapter: DatabaseAdapter) => Promise<T>): Promise<T> {
@@ -154,7 +167,11 @@ class SqliteAdapter implements DatabaseAdapter {
     await this.queue.run(async () => {
       if (this.closed) return;
       this.closed = true;
-      this.database.close();
+      try {
+        this.database.close();
+      } finally {
+        this.releaseQueue();
+      }
     });
   }
 }
@@ -266,7 +283,18 @@ export function sqlite(options: SqliteOptions = {}): DatabaseDriver {
     targetIdentity: identity,
     shadowIdentity: ":memory:",
     async open() {
-      return new SqliteAdapter(new DatabaseSync(filename), identity);
+      const database = new DatabaseSync(filename);
+      if (identity === ":memory:") return new SqliteAdapter(database, identity);
+      const shared = sharedQueues.get(identity) ?? { queue: new SqliteQueue(), users: 0 };
+      shared.users += 1;
+      sharedQueues.set(identity, shared);
+      let released = false;
+      return new SqliteAdapter(database, identity, shared.queue, () => {
+        if (released) return;
+        released = true;
+        shared.users -= 1;
+        if (shared.users === 0 && sharedQueues.get(identity) === shared) sharedQueues.delete(identity);
+      });
     },
     async shadow() {
       return tooling(":memory:");
