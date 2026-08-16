@@ -118,9 +118,7 @@ class SqliteAdapter implements DatabaseAdapter {
     const current = context.getStore();
     if (current?.adapter === this) {
       return current.nestedQueue.run(() =>
-        context.run({ adapter: this, nestedQueue: new SqliteQueue() }, () =>
-          this.nested(callback),
-        ),
+        context.run({ adapter: this, nestedQueue: new SqliteQueue() }, () => this.nested(callback)),
       );
     }
     return this.queue.run(() =>
@@ -293,7 +291,8 @@ export function sqlite(options: SqliteOptions = {}): DatabaseDriver {
         if (released) return;
         released = true;
         shared.users -= 1;
-        if (shared.users === 0 && sharedQueues.get(identity) === shared) sharedQueues.delete(identity);
+        if (shared.users === 0 && sharedQueues.get(identity) === shared)
+          sharedQueues.delete(identity);
       });
     },
     async shadow() {

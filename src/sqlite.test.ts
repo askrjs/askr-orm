@@ -66,10 +66,12 @@ describe("SQLite dialect", () => {
     ).resolves.toBeUndefined();
 
     expect(
-      (await adapter.execute<{ value: string }>({
-        text: "SELECT value FROM values_table ORDER BY value",
-        values: [],
-      })).rows,
+      (
+        await adapter.execute<{ value: string }>({
+          text: "SELECT value FROM values_table ORDER BY value",
+          values: [],
+        })
+      ).rows,
     ).toEqual([{ value: "a" }, { value: "b" }, { value: "nested" }]);
     await adapter.close?.();
   });
