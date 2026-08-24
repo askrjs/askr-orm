@@ -95,6 +95,7 @@ export {
   compileKeyedSql,
   compileSql,
   eq,
+  escapeLikePattern,
   executeKeyedSql,
   gt,
   gte,

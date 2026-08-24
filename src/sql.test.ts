@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { and, compileKeyedSql, compileSql, eq, identifier, inArray, literal, sql } from "./index";
+import {
+  and,
+  columnRef,
+  compileKeyedSql,
+  compileSql,
+  eq,
+  escapeLikePattern,
+  identifier,
+  inArray,
+  like,
+  literal,
+  sql,
+} from "./index";
 import { rewritePlaceholders, sqlStructure } from "./placeholders";
 
 describe("SQL boundaries", () => {
@@ -34,6 +46,14 @@ describe("SQL boundaries", () => {
     expect(compileSql(predicate)).toEqual({
       text: '("email" = $1 AND "id" IN ($2, $3))',
       values: ["a@example.com", "one", "two"],
+    });
+  });
+
+  it("should escape literal LIKE wildcards and declare the escape character", () => {
+    const search = String.raw`50%_off\today`;
+    expect(compileSql(like(columnRef("items", "name"), `%${escapeLikePattern(search)}%`))).toEqual({
+      text: `"items"."name" LIKE $1 ESCAPE '\\'`,
+      values: [String.raw`%50\%\_off\\today%`],
     });
   });
 

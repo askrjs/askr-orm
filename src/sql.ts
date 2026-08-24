@@ -215,12 +215,18 @@ export const lt = <T>(left: Expression<T>, right: Expression<T> | T): SqlFragmen
 /** Builds a `<=` comparison predicate. */
 export const lte = <T>(left: Expression<T>, right: Expression<T> | T): SqlFragment<boolean> =>
   binary(left, "<=", right);
-/** Builds a `LIKE` predicate. */
+
+/** Escapes a string for literal matching in a `LIKE` or `ILIKE` pattern. */
+export function escapeLikePattern(input: string): string {
+  return input.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_");
+}
+
+/** Builds a `LIKE` predicate using backslash as the pattern escape character. */
 export const like = (left: Expression<string>, pattern: string): SqlFragment<boolean> =>
-  binary(left, "LIKE", pattern);
-/** Builds an `ILIKE` predicate. PostgreSQL only. */
+  sql<boolean>`${binary(left, "LIKE", pattern)} ESCAPE '\\'`;
+/** Builds an `ILIKE` predicate using backslash as the pattern escape character. PostgreSQL only. */
 export const ilike = (left: Expression<string>, pattern: string): SqlFragment<boolean> =>
-  binary(left, "ILIKE", pattern);
+  sql<boolean>`${binary(left, "ILIKE", pattern)} ESCAPE '\\'`;
 /** Builds an `IS NULL` predicate. */
 export const isNull = (value: Expression): SqlFragment<boolean> =>
   sql<boolean>`${expressionSql(value)} IS NULL`;
