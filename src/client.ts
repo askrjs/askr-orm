@@ -312,8 +312,7 @@ export class TableClient<T extends AnyTable> {
     const rows: InferRow<T>[] = [];
     for (let index = 0; index < inputs.length; index += effectiveChunkSize) {
       const chunk = inputs.slice(index, index + effectiveChunkSize);
-      const properties = batchProperties(chunk as readonly Record<string, unknown>[]);
-      const columns = properties.map((property) => {
+      const columns = allProperties.map((property) => {
         const column = this.definition.$columns[property];
         if (!column) throw new Error(`Unknown ${this.definition.$name} property ${property}.`);
         return column;
@@ -321,7 +320,7 @@ export class TableClient<T extends AnyTable> {
       const values: unknown[] = [];
       const tuples = chunk.map((input) => {
         const record = input as Record<string, unknown>;
-        return `(${properties
+        return `(${allProperties
           .map((property) => {
             if (!(property in record)) return "DEFAULT";
             values.push(encode(this.definition.$columns[property]!, record[property]));
@@ -456,8 +455,7 @@ export class TableClient<T extends AnyTable> {
     );
     for (let index = 0; index < inputs.length; index += effectiveChunkSize) {
       const chunk = inputs.slice(index, index + effectiveChunkSize);
-      const properties = batchProperties(chunk as readonly Record<string, unknown>[]);
-      const columns = properties.map((property) => {
+      const columns = allProperties.map((property) => {
         const column = this.definition.$columns[property];
         if (!column) throw new Error(`Unknown ${this.definition.$name} property ${property}.`);
         return column;
@@ -465,7 +463,7 @@ export class TableClient<T extends AnyTable> {
       const values: unknown[] = [];
       const tuples = chunk.map((input) => {
         const record = input as Record<string, unknown>;
-        return `(${properties
+        return `(${allProperties
           .map((property) => {
             if (!(property in record)) return "DEFAULT";
             values.push(encode(this.definition.$columns[property]!, record[property]));
@@ -473,7 +471,7 @@ export class TableClient<T extends AnyTable> {
           })
           .join(", ")})`;
       });
-      const updates = properties.filter(
+      const updates = allProperties.filter(
         (property) => !this.definition.$columns[property]!.ast.primaryKey,
       );
       const query = {

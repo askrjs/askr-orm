@@ -99,6 +99,49 @@ describe("database client", () => {
     ]);
   });
 
+  it("should use one column set across heterogeneous bulk-write chunks", async () => {
+    const heterogeneous = table("heterogeneous", {
+      id: uuid().primaryKey(),
+      first: text(),
+      second: text(),
+    });
+    const inputs = [
+      { id: "1", first: "one" },
+      { id: "2", first: "two", second: "two" },
+      { id: "3", second: "three" },
+    ];
+
+    for (const operation of ["insertMany", "upsertMany"] as const) {
+      const adapter = new RecordingAdapter();
+      const db = createDatabaseClient({ heterogeneous }, adapter);
+      await db.heterogeneous[operation](inputs, { chunkSize: 1 });
+
+      const singleChunkAdapter = new RecordingAdapter();
+      const singleChunkDb = createDatabaseClient({ heterogeneous }, singleChunkAdapter);
+      await singleChunkDb.heterogeneous[operation](inputs, { chunkSize: inputs.length });
+      const singleChunkColumns = singleChunkAdapter.queries[0]!.text.match(/\([^)]*\)/)?.[0];
+
+      expect(adapter.queries).toHaveLength(3);
+      expect(singleChunkColumns).toBe('("id", "first", "second")');
+      expect(adapter.queries.map((query) => query.text.match(/\([^)]*\)/)?.[0])).toEqual([
+        singleChunkColumns,
+        singleChunkColumns,
+        singleChunkColumns,
+      ]);
+      if (operation === "upsertMany") {
+        const updateClause = singleChunkAdapter.queries[0]!.text.match(
+          /DO (?:NOTHING|UPDATE SET .*)/,
+        )?.[0];
+        expect(updateClause).toBe(
+          'DO UPDATE SET "first" = EXCLUDED."first", "second" = EXCLUDED."second"',
+        );
+        expect(
+          adapter.queries.map((query) => query.text.match(/DO (?:NOTHING|UPDATE SET .*)/)?.[0]),
+        ).toEqual([updateClause, updateClause, updateClause]);
+      }
+    }
+  });
+
   it("should require explicit join projection and compile null-safe left joins", () => {
     const adapter = new RecordingAdapter();
     const db = createDatabaseClient({ users, groups }, adapter);
