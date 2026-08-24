@@ -63,7 +63,7 @@ integration("PostgreSQL adapter conformance", () => {
 
   afterAll(async () => {
     await pool.query(
-      'DROP TABLE IF EXISTS "_askr_migrations", "orm_migration_probe", "orm_wide", "orm_users", "orm_groups" CASCADE',
+      'DROP TABLE IF EXISTS "_askr_migrations", "orm_migration_probe", "orm_migration_race", "orm_wide", "orm_users", "orm_groups" CASCADE',
     );
     await pool.end();
     await adapter.close?.();
@@ -190,5 +190,39 @@ integration("PostgreSQL adapter conformance", () => {
         migrations: [{ ...manifest.migrations[0]!, checksum: "edited" }],
       }).plan(),
     ).rejects.toThrow(/checksum drift/);
+  });
+
+  it("should queue beyond a bounded pool and serialize racing migration applicants", async () => {
+    const bounded = await postgres({ url: databaseUrl!, pool: { max: 2 } }).open();
+    try {
+      await expect(
+        Promise.all(
+          Array.from({ length: 8 }, () =>
+            bounded.execute({ text: "SELECT pg_sleep(0.01), 1 AS value", values: [] }),
+          ),
+        ),
+      ).resolves.toHaveLength(8);
+
+      await pool.query('DROP TABLE IF EXISTS "_askr_migrations", "orm_migration_race"');
+      const raceManifest: MigrationManifest = {
+        migrations: [
+          {
+            id: "01ORMRACE",
+            parent: null,
+            checksum: "race-checksum",
+            sql: 'CREATE TABLE "orm_migration_race" ("id" integer PRIMARY KEY)',
+            transactional: true,
+          },
+        ],
+      };
+      await expect(
+        Promise.all([
+          createMigrationsApi(adapter, raceManifest).apply(),
+          createMigrationsApi(bounded, raceManifest).apply(),
+        ]),
+      ).resolves.toEqual(expect.arrayContaining([{ applied: ["01ORMRACE"] }, { applied: [] }]));
+    } finally {
+      await bounded.close?.();
+    }
   });
 });
