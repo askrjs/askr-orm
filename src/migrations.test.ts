@@ -9,7 +9,8 @@ class MigrationAdapter implements DatabaseAdapter {
   readonly ledger: AppliedMigration[] = [];
   transactions = 0;
   sessions = 0;
-  failSql = false;
+  readonly failStatements = new Set<string>();
+  private lockTail: Promise<void> = Promise.resolve();
 
   async execute<Row = Record<string, unknown>>(
     query: SqlQuery,
@@ -38,7 +39,7 @@ class MigrationAdapter implements DatabaseAdapter {
       const index = this.ledger.findIndex((entry) => entry.id === query.values[0]);
       if (index >= 0) this.ledger.splice(index, 1);
     }
-    if (query.text === "SELECT 1" && this.failSql) {
+    if (this.failStatements.has(query.text)) {
       throw Object.assign(new Error("migration failed"), { code: "XX000" });
     }
     return { rows: [], rowCount: 0 };
@@ -64,7 +65,18 @@ class MigrationAdapter implements DatabaseAdapter {
   }
 
   async migrationLock<T>(callback: (adapter: DatabaseAdapter) => Promise<T>): Promise<T> {
-    return this.session(callback);
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const previous = this.lockTail;
+    this.lockTail = previous.then(() => current);
+    await previous;
+    try {
+      return await this.session(callback);
+    } finally {
+      release();
+    }
   }
 }
 
@@ -140,7 +152,6 @@ describe("migrations", () => {
       durationMs: 1,
     });
     const api = createMigrationsApi(adapter, manifest);
-    adapter.failSql = false;
     const originalExecute = adapter.execute.bind(adapter);
     adapter.execute = async <Row>(query: SqlQuery, options?: QueryOptions) => {
       if (query.text === "SELECT 2") throw new Error("connection lost");
@@ -151,5 +162,61 @@ describe("migrations", () => {
     await expect(api.plan()).rejects.toThrow(/migration resolve/);
     await api.resolve("02", "rolled-back");
     expect(adapter.ledger.some((entry) => entry.id === "02")).toBe(false);
+  });
+
+  it("should resolve failed migrations as rolled back or force applied", async () => {
+    const failed: AppliedMigration = {
+      id: "02",
+      parent: "01",
+      checksum: "two",
+      state: "failed",
+      startedAt: "",
+      finishedAt: "",
+      durationMs: 12,
+    };
+    const adapter = new MigrationAdapter();
+    const api = createMigrationsApi(adapter, manifest);
+
+    adapter.ledger.push(failed);
+    await api.resolve("02", "rolled-back");
+    expect(adapter.ledger).toEqual([]);
+
+    adapter.ledger.push(failed);
+    await api.resolve("02", "applied");
+    expect(adapter.ledger).toEqual([
+      expect.objectContaining({ id: "02", state: "applied", durationMs: 12 }),
+    ]);
+  });
+
+  it("should serialize concurrent migration runs under the migration lock", async () => {
+    const adapter = new MigrationAdapter();
+    const api = createMigrationsApi(adapter, manifest);
+
+    await expect(Promise.all([api.apply(), api.apply()])).resolves.toEqual([
+      { applied: ["01", "02"] },
+      { applied: [] },
+    ]);
+    expect(adapter.sessions).toBe(2);
+    expect(adapter.ledger.map((entry) => entry.id)).toEqual(["01", "02"]);
+  });
+
+  it("should preserve earlier migrations and skip later ones after a middle failure", async () => {
+    const adapter = new MigrationAdapter();
+    const threeStepManifest: MigrationManifest = {
+      migrations: [
+        { id: "01", parent: null, checksum: "one", sql: "SELECT 1", transactional: true },
+        { id: "02", parent: "01", checksum: "two", sql: "SELECT 2", transactional: true },
+        { id: "03", parent: "02", checksum: "three", sql: "SELECT 3", transactional: true },
+      ],
+    };
+    adapter.failStatements.add("SELECT 2");
+
+    await expect(createMigrationsApi(adapter, threeStepManifest).apply()).rejects.toThrow(
+      "migration failed",
+    );
+    expect(adapter.ledger.map(({ id, state }) => ({ id, state }))).toEqual([
+      { id: "01", state: "applied" },
+    ]);
+    expect(adapter.statements).not.toContain("SELECT 3");
   });
 });
