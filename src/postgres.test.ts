@@ -4,13 +4,16 @@ const state = vi.hoisted(() => ({
   statements: [] as string[],
   ends: 0,
   releases: 0,
+  failRollback: false,
   clientErrorListeners: new Set<(error: Error) => void>(),
 }));
 
 vi.mock("pg", () => {
   class Pool {
     async query(config: string | { text?: string }) {
-      state.statements.push(typeof config === "string" ? config : (config.text ?? ""));
+      const statement = typeof config === "string" ? config : (config.text ?? "");
+      state.statements.push(statement);
+      if (state.failRollback && statement === "ROLLBACK") throw new Error("rollback failed");
       return { rows: [], rowCount: 0 };
     }
 
@@ -50,6 +53,7 @@ describe("PostgreSQL adapter", () => {
     state.statements.length = 0;
     state.ends = 0;
     state.releases = 0;
+    state.failRollback = false;
     state.clientErrorListeners.clear();
   });
 
@@ -90,6 +94,23 @@ describe("PostgreSQL adapter", () => {
       }),
     ).rejects.toMatchObject({ category: "connection", code: "57P01" });
     expect(state.clientErrorListeners).toHaveLength(0);
+    expect(state.releases).toBe(1);
+  });
+
+  it("should preserve the callback error when rollback fails", async () => {
+    const adapter = await postgres({
+      url: "postgres://target",
+      shadowUrl: "postgres://shadow",
+    }).open();
+    const callbackError = new Error("callback failed");
+    state.failRollback = true;
+
+    await expect(
+      adapter.transaction(async () => {
+        throw callbackError;
+      }),
+    ).rejects.toBe(callbackError);
+    expect(state.statements).toEqual(["BEGIN", "ROLLBACK"]);
     expect(state.releases).toBe(1);
   });
 });

@@ -61,7 +61,8 @@ Composite primary keys accept only key objects; single-column keys also accept
 their scalar value. Writes return status by default. Ordinary promises are the
 non-atomic coordination mechanism; use `db.transaction(...)` when operations
 must be atomic. Nested transactions use savepoints, and a transaction client
-throws after its callback completes.
+throws after its callback completes. If rollback cleanup itself fails, the
+original callback error remains the error surfaced to the caller.
 
 Read builders are immutable and parameterized, support typed projections and
 joins, and expose preparation, streaming, and `toSQL()`. Dynamic identifiers

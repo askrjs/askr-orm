@@ -1,13 +1,37 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { defineDatabase, defineQuery, table, text } from "./index";
 import { jsonb } from "./postgres";
 import { sqlite } from "./sqlite";
 import { createMigrationsApi } from "./migrations";
 
 describe("SQLite dialect", () => {
+  it("should preserve the callback error when rollback fails", async () => {
+    const adapter = await sqlite({ filename: ":memory:" }).open();
+    const callbackError = new Error("callback failed");
+    const originalExec = DatabaseSync.prototype.exec;
+    const exec = vi
+      .spyOn(DatabaseSync.prototype, "exec")
+      .mockImplementation(function (this: DatabaseSync, sql) {
+        if (sql === "ROLLBACK") throw new Error("rollback failed");
+        return originalExec.call(this, sql);
+      });
+
+    try {
+      await expect(
+        adapter.transaction(async () => {
+          throw callbackError;
+        }),
+      ).rejects.toBe(callbackError);
+    } finally {
+      exec.mockRestore();
+      await adapter.close?.();
+    }
+  });
+
   it("should execute parameterized CRUD, nested transactions, and streams", async () => {
     const adapter = await sqlite({ filename: ":memory:" }).open();
     await adapter.execute({
