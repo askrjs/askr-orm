@@ -129,6 +129,45 @@ describe("SQLite dialect", () => {
     await adapter.close?.();
   });
 
+  it("should preserve interleaved commit and rollback across four savepoint levels", async () => {
+    const adapter = await sqlite({ filename: ":memory:" }).open();
+    await adapter.execute({ text: "CREATE TABLE values_table (value text)", values: [] });
+    await adapter.transaction(async (outer) => {
+      await outer.execute({ text: "INSERT INTO values_table VALUES ($1)", values: ["outer"] });
+      await expect(
+        outer.transaction(async (levelTwo) => {
+          await levelTwo.execute({ text: "INSERT INTO values_table VALUES ($1)", values: ["two"] });
+          await levelTwo.transaction(async (levelThree) => {
+            await levelThree.execute({
+              text: "INSERT INTO values_table VALUES ($1)",
+              values: ["three"],
+            });
+            await expect(
+              levelThree.transaction(async (levelFour) => {
+                await levelFour.execute({
+                  text: "INSERT INTO values_table VALUES ($1)",
+                  values: ["rolled-back"],
+                });
+                throw new Error("rollback level four");
+              }),
+            ).rejects.toThrow("rollback level four");
+          });
+          throw new Error("rollback level two");
+        }),
+      ).rejects.toThrow("rollback level two");
+      await outer.execute({ text: "INSERT INTO values_table VALUES ($1)", values: ["committed"] });
+    });
+    expect(
+      (
+        await adapter.execute<{ value: string }>({
+          text: "SELECT value FROM values_table ORDER BY value",
+          values: [],
+        })
+      ).rows,
+    ).toEqual([{ value: "committed" }, { value: "outer" }]);
+    await adapter.close?.();
+  });
+
   it("should serialize adapters that target the same SQLite file", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "askr-orm-sqlite-"));
     const filename = path.join(directory, "shared.sqlite");
@@ -148,6 +187,51 @@ describe("SQLite dialect", () => {
           second.execute({ text: "INSERT INTO values_table VALUES ($1)", values: ["b"] }),
         ]),
       ).resolves.toBeDefined();
+    } finally {
+      await first.close?.();
+      await second.close?.();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("should serialize concurrent bulk writes from adapters sharing a SQLite file", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "askr-orm-sqlite-bulk-"));
+    const filename = path.join(directory, "shared.sqlite");
+    const items = table("items", { id: text().primaryKey(), value: text().notNull() });
+    const first = await sqlite({ filename }).open();
+    const second = await sqlite({ filename }).open();
+    const firstDb = createDatabaseClient({ items }, first);
+    const secondDb = createDatabaseClient({ items }, second);
+    try {
+      await first.execute({
+        text: 'CREATE TABLE "public"."items" ("id" text PRIMARY KEY, "value" text NOT NULL)',
+        values: [],
+      });
+      await expect(
+        Promise.all([
+          firstDb.items.insertMany(
+            Array.from({ length: 20 }, (_, id) => ({ id: `first-${id}`, value: `first-${id}` })),
+            { chunkSize: 3 },
+          ),
+          secondDb.items.insertMany(
+            Array.from({ length: 20 }, (_, id) => ({ id: `second-${id}`, value: `second-${id}` })),
+            { chunkSize: 4 },
+          ),
+        ]),
+      ).resolves.toEqual([{ rowsAffected: 20 }, { rowsAffected: 20 }]);
+      await expect(
+        Promise.all([
+          firstDb.items.upsertMany(
+            Array.from({ length: 20 }, (_, id) => ({ id: String(id), value: `first-${id}` })),
+            { chunkSize: 3 },
+          ),
+          secondDb.items.upsertMany(
+            Array.from({ length: 20 }, (_, id) => ({ id: String(id), value: `second-${id}` })),
+            { chunkSize: 4 },
+          ),
+        ]),
+      ).resolves.toEqual([{ rowsAffected: 20 }, { rowsAffected: 20 }]);
+      expect((await secondDb.items.limit(100).execute()).map(({ id }) => id)).toHaveLength(60);
     } finally {
       await first.close?.();
       await second.close?.();

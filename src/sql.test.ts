@@ -101,6 +101,34 @@ describe("SQL boundaries", () => {
     }
   });
 
+  it("should keep placeholder-like text inert across escaped and JSON-shaped values", () => {
+    const query = sql.key("documents.by-id", { id: "", payload: {} })`
+      SELECT ':id', E'escaped\\:id', payload FROM documents
+      WHERE payload = :payload::jsonb AND id = :id
+    `;
+    const payload = { note: ":id", nested: [":payload", "::cast"] };
+
+    expect(compileKeyedSql(query, { id: "doc-1", payload })).toEqual({
+      text: "\n      SELECT ':id', E'escaped\\:id', payload FROM documents\n      WHERE payload = $1::jsonb AND id = $2\n    ",
+      values: [payload, "doc-1"],
+    });
+  });
+
+  it("should quote embedded identifier delimiters and preserve edge finite literals", () => {
+    expect(compileSql(sql`SELECT ${identifier('odd"name')} AS ${identifier("select")}`)).toEqual({
+      text: 'SELECT "odd""name" AS "select"',
+      values: [],
+    });
+    expect(compileSql(sql`SELECT ${literal(-0)}, ${literal(Number.MAX_SAFE_INTEGER)}`)).toEqual({
+      text: "SELECT 0, 9007199254740991",
+      values: [],
+    });
+  });
+
+  it("should make an empty condition set visibly invalid instead of matching every row", () => {
+    expect(compileSql(and())).toEqual({ text: "()", values: [] });
+  });
+
   it("should reject non-finite numbers given SQL literal formatting", () => {
     for (const value of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
       expect(() => compileSql(sql`SELECT ${literal(value)}`)).toThrow(/finite number/i);
