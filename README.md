@@ -2,9 +2,9 @@
 
 SQL-shaped data access for PostgreSQL 16–18 and SQLite on Node 24 or newer.
 
-This package is a clean v1 candidate and remains intentionally unreleased at
-version `0.0.0`. It has no identity map, lazy loading, relation includes,
-nested writes, startup migration, or rollback migrations.
+This package keeps a deliberately narrow surface: it has no identity map, lazy
+loading, relation includes, nested writes, startup migration, or rollback
+migrations.
 
 ## Define one database
 

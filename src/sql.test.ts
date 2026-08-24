@@ -134,4 +134,10 @@ describe("SQL boundaries", () => {
       expect(() => compileSql(sql`SELECT ${literal(value)}`)).toThrow(/finite number/i);
     }
   });
+
+  it("should reject integer literals whose precision cannot be represented", () => {
+    for (const value of [Number.MAX_SAFE_INTEGER + 1, Number.MIN_SAFE_INTEGER - 1]) {
+      expect(() => compileSql(sql`SELECT ${literal(value)}`)).toThrow(/safe integer/i);
+    }
+  });
 });

@@ -225,4 +225,23 @@ integration("PostgreSQL adapter conformance", () => {
       await bounded.close?.();
     }
   });
+
+  it("should resolve failed non-transactional migrations on PostgreSQL", async () => {
+    await pool.query('DROP TABLE IF EXISTS "_askr_migrations"');
+    const migrations = createMigrationsApi(adapter, {
+      migrations: [
+        {
+          id: "01FAILED",
+          parent: null,
+          checksum: "failed",
+          sql: "SELECT * FROM missing_resolution_table",
+          transactional: false,
+        },
+      ],
+    });
+    await expect(migrations.apply()).rejects.toThrow();
+    await expect(migrations.plan()).rejects.toThrow(/migration resolve/);
+    await expect(migrations.resolve("01FAILED", "rolled-back")).resolves.toBeUndefined();
+    expect((await migrations.plan()).pending.map(({ id }) => id)).toEqual(["01FAILED"]);
+  });
 });
