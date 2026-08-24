@@ -70,6 +70,9 @@ export function literal(value: string | number | boolean | null): SqlFragment {
   if (typeof value === "number" && !Number.isFinite(value)) {
     throw new RangeError("SQL numeric literals require a finite number.");
   }
+  if (typeof value === "number" && Number.isInteger(value) && !Number.isSafeInteger(value)) {
+    throw new RangeError("SQL integer literals require a safe integer.");
+  }
   return fragment([{ kind: "text", value: String(value) }]);
 }
 

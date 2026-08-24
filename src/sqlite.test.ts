@@ -277,4 +277,24 @@ describe("SQLite dialect", () => {
     expect((await migrations.plan()).pending).toHaveLength(0);
     await adapter.close?.();
   });
+
+  it("should resolve failed non-transactional migrations on SQLite", async () => {
+    const adapter = await sqlite({ filename: ":memory:" }).open();
+    const migrations = createMigrationsApi(adapter, {
+      migrations: [
+        {
+          id: "01FAILED",
+          parent: null,
+          checksum: "failed",
+          sql: "SELECT * FROM missing_resolution_table",
+          transactional: false,
+        },
+      ],
+    });
+    await expect(migrations.apply()).rejects.toThrow();
+    await expect(migrations.plan()).rejects.toThrow(/migration resolve/);
+    await expect(migrations.resolve("01FAILED", "rolled-back")).resolves.toBeUndefined();
+    expect((await migrations.plan()).pending.map(({ id }) => id)).toEqual(["01FAILED"]);
+    await adapter.close?.();
+  });
 });
