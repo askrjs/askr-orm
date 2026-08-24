@@ -74,6 +74,14 @@ class SqliteAdapter implements DatabaseAdapter {
     if (this.closed) throw new Error("SQLite database is closed.");
   }
 
+  private bestEffortExec(sql: string): void {
+    try {
+      this.database.exec(sql);
+    } catch {
+      // Preserve the operation error that triggered transaction cleanup.
+    }
+  }
+
   private perform<Row>(query: SqlQuery): ExecutionResult<Row> {
     this.assertOpen();
     const compiled = sqliteQuery(query);
@@ -129,7 +137,7 @@ class SqliteAdapter implements DatabaseAdapter {
           this.database.exec("COMMIT");
           return result;
         } catch (error) {
-          this.database.exec("ROLLBACK");
+          this.bestEffortExec("ROLLBACK");
           throw error;
         }
       }),
@@ -155,8 +163,8 @@ class SqliteAdapter implements DatabaseAdapter {
       this.database.exec(`RELEASE SAVEPOINT ${name}`);
       return result;
     } catch (error) {
-      this.database.exec(`ROLLBACK TO SAVEPOINT ${name}`);
-      this.database.exec(`RELEASE SAVEPOINT ${name}`);
+      this.bestEffortExec(`ROLLBACK TO SAVEPOINT ${name}`);
+      this.bestEffortExec(`RELEASE SAVEPOINT ${name}`);
       throw error;
     }
   }
