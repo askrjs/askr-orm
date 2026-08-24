@@ -9,7 +9,15 @@ nested writes, startup migration, or rollback migrations.
 ## Define one database
 
 ```ts
-import { defineDatabase, defineQuery, table, text, uuid } from "@askrjs/orm";
+import {
+  defineDatabase,
+  defineQuery,
+  escapeLikePattern,
+  like,
+  table,
+  text,
+  uuid,
+} from "@askrjs/orm";
 import { postgres } from "@askrjs/orm/postgres";
 import { generated } from "./generated.js";
 
@@ -55,6 +63,9 @@ await db.users.upsert({ id: userId, email });
 await db.users.upsertMany(rows);
 
 const rows = await db.queries.byEmail({ email });
+
+const search = `%${escapeLikePattern(userInput)}%`;
+const matches = await db.users.where(({ users }) => like(users.email, search)).execute();
 ```
 
 Composite primary keys accept only key objects; single-column keys also accept
@@ -63,6 +74,10 @@ non-atomic coordination mechanism; use `db.transaction(...)` when operations
 must be atomic. Nested transactions use savepoints, and a transaction client
 throws after its callback completes. If rollback cleanup itself fails, the
 original callback error remains the error surfaced to the caller.
+
+`escapeLikePattern()` escapes `\\`, `%`, and `_` for literal-text searches.
+`like()` and `ilike()` bind the pattern and emit the matching `ESCAPE '\\'`
+clause; `ilike()` is PostgreSQL-only.
 
 Read builders are immutable and parameterized, support typed projections and
 joins, and expose preparation, streaming, and `toSQL()`. Dynamic identifiers

@@ -3,12 +3,41 @@ import { tmpdir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { defineDatabase, defineQuery, table, text } from "./index";
+import {
+  createDatabaseClient,
+  defineDatabase,
+  defineQuery,
+  escapeLikePattern,
+  like,
+  table,
+  text,
+} from "./index";
 import { jsonb } from "./postgres";
 import { sqlite } from "./sqlite";
 import { createMigrationsApi } from "./migrations";
 
 describe("SQLite dialect", () => {
+  it("should match escaped LIKE wildcards as literal text", async () => {
+    const items = table("items", { value: text().primaryKey() });
+    const adapter = await sqlite({ filename: ":memory:" }).open();
+    const db = createDatabaseClient({ items }, adapter);
+    try {
+      await adapter.execute({
+        text: 'CREATE TABLE "public"."items" ("value" text PRIMARY KEY)',
+        values: [],
+      });
+      await db.items.insertMany([{ value: "save 50%_today" }, { value: "save 500Xtoday" }]);
+
+      await expect(
+        db.items
+          .where(({ items: columns }) => like(columns.value, `%${escapeLikePattern("50%_today")}%`))
+          .execute(),
+      ).resolves.toEqual([{ value: "save 50%_today" }]);
+    } finally {
+      await adapter.close?.();
+    }
+  });
+
   it("should preserve the callback error when rollback fails", async () => {
     const adapter = await sqlite({ filename: ":memory:" }).open();
     const callbackError = new Error("callback failed");
