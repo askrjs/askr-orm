@@ -140,21 +140,19 @@ export function snapshotDefinition(
     }
   }
   const tables = Object.values(definition.tables)
-    .map(
-      (table): SnapshotTable => ({
-        schema: table.$schema,
-        name: table.$name,
-        ...(table.$options.renamedFrom === undefined
-          ? {}
-          : { renamedFrom: table.$options.renamedFrom }),
-        columns: Object.entries(table.$columns)
-          .map(([property, column]) => columnSnapshot(property, column))
-          .sort((left, right) => left.name.localeCompare(right.name)),
-        constraints: [...(table.$options.constraints ?? [])].sort((left, right) =>
-          JSON.stringify(left).localeCompare(JSON.stringify(right)),
-        ),
-      }),
-    )
+    .map((table): SnapshotTable => ({
+      schema: table.$schema,
+      name: table.$name,
+      ...(table.$options.renamedFrom === undefined
+        ? {}
+        : { renamedFrom: table.$options.renamedFrom }),
+      columns: Object.entries(table.$columns)
+        .map(([property, column]) => columnSnapshot(property, column))
+        .sort((left, right) => left.name.localeCompare(right.name)),
+      constraints: [...(table.$options.constraints ?? [])].sort((left, right) =>
+        JSON.stringify(left).localeCompare(JSON.stringify(right)),
+      ),
+    }))
     .sort((left, right) =>
       `${left.schema}.${left.name}`.localeCompare(`${right.schema}.${right.name}`),
     );
