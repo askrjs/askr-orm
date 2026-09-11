@@ -79,7 +79,7 @@
     "pg-query-stream": "^4.17.0",
     "publint": "^0.3.24",
     "typescript": "^7.0.2",
-    "vite-plus": "^0.3.0",
+    "vite-plus": "^0.3.1",
     "vitest": "^4.1.11"
   },
   "peerDependencies": {

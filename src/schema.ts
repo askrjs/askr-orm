@@ -221,26 +221,30 @@ export type InferInsert<T extends AnyTable> = Readonly<
 /** Input shape accepted by updates: all non-primary-key columns, all optional. */
 export type InferPatch<T extends AnyTable> = Readonly<
   Partial<{
-    [K in keyof T["$columns"] as T["$columns"][K] extends ColumnBuilder<
+    [
+      K in keyof T["$columns"] as T["$columns"][K] extends ColumnBuilder<
+        unknown,
+        boolean,
+        boolean,
+        true
+      >
+        ? never
+        : K
+    ]: ColumnValue<T["$columns"][K]>;
+  }>
+>;
+/** Primary key shape for a table: just its primary-key column(s). */
+export type InferKey<T extends AnyTable> = Readonly<{
+  [
+    K in keyof T["$columns"] as T["$columns"][K] extends ColumnBuilder<
       unknown,
       boolean,
       boolean,
       true
     >
-      ? never
-      : K]: ColumnValue<T["$columns"][K]>;
-  }>
->;
-/** Primary key shape for a table: just its primary-key column(s). */
-export type InferKey<T extends AnyTable> = Readonly<{
-  [K in keyof T["$columns"] as T["$columns"][K] extends ColumnBuilder<
-    unknown,
-    boolean,
-    boolean,
-    true
-  >
-    ? K
-    : never]: ColumnValue<T["$columns"][K]>;
+      ? K
+      : never
+  ]: ColumnValue<T["$columns"][K]>;
 }>;
 
 function column<T>(dataType: string): ColumnBuilder<T> {
