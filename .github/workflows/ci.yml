@@ -10,7 +10,8 @@ permissions:
   contents: read
 
 jobs:
-  package:
+  package-platform:
+    name: package (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -41,6 +42,16 @@ jobs:
           name: orm-coverage-${{ matrix.os }}
           path: coverage
           if-no-files-found: warn
+
+  package:
+    needs: package-platform
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every platform package gate
+        env:
+          PACKAGE_RESULT: ${{ needs.package-platform.result }}
+        run: test "$PACKAGE_RESULT" = success
 
   postgres-contract:
     name: PostgreSQL ${{ matrix.postgres }}
