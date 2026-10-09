@@ -100,6 +100,42 @@ try {
     consumer,
   );
   const fixture = path.join(consumer, "fixture.ts");
+  const postgresWorkflow = Boolean(
+    process.env.ASKR_ORM_TEST_DATABASE_URL && process.env.ASKR_ORM_TEST_SHADOW_URL,
+  );
+  if (postgresWorkflow) {
+    await fs.mkdir(path.join(consumer, "database"));
+    await fs.writeFile(
+      path.join(consumer, "database/index.ts"),
+      `
+import { defineDatabase, defineQuery, table, text, uuid } from '@askrjs/orm';
+import { postgres } from '@askrjs/orm/postgres';
+const users = table('users', { id: uuid().primaryKey().defaultRandom(), emailAddress: text().name('email').notNull().unique() });
+const byEmail = defineQuery<{email:string}>('users.by-email')\`SELECT id, email FROM users WHERE email = \${'email'} OR email = \${'email'}\`;
+export default defineDatabase({ driver: postgres({ url: process.env.ASKR_ORM_TEST_DATABASE_URL!, shadowUrl: process.env.ASKR_ORM_TEST_SHADOW_URL!, pool: {max:1} }), tables: {users}, queries: {byEmail} });
+`,
+    );
+    await fs.writeFile(
+      path.join(consumer, "postgres-workflow.mjs"),
+      `
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import {runDatabaseCli} from '@askrjs/orm/tooling';
+const messages=[];
+const io={log:(v='')=>messages.push(String(v)), error:(v='')=>messages.push(String(v))};
+for (const command of ['generate','validate','generate']) assert.equal(await runDatabaseCli([command], {cwd:process.cwd(),io}), 0, messages.join('\\n'));
+assert.equal(messages.at(-1),'default: unchanged');
+assert.equal((await fs.readdir('database/migrations')).length,1);
+const generated=await fs.readFile('database/generated.ts','utf8');
+assert(generated.includes('readonly "id": string | null;'));
+assert(generated.includes('readonly "email": string | null;'));
+`,
+    );
+    execFileSync(process.execPath, [path.join(consumer, "postgres-workflow.mjs")], {
+      cwd: consumer,
+      stdio: "pipe",
+    });
+  }
   const imports = Object.entries(contract.entrypoints)
     .map(
       ([key]) =>
@@ -134,13 +170,13 @@ void [generated, codec, postgresOptions, invalidPool, sqliteOptions];\n`,
         types: ["node"],
         skipLibCheck: false,
       },
-      files: ["fixture.ts"],
+      files: ["fixture.ts", ...(postgresWorkflow ? ["database/generated.ts"] : [])],
     }),
   );
   execFileSync(
     process.execPath,
     [path.join(root, "node_modules/typescript/bin/tsc"), "--project", "tsconfig.json"],
-    { cwd: consumer, stdio: "pipe" },
+    { cwd: consumer, stdio: "pipe", encoding: "utf8" },
   );
   const options = {
     strict: true,
@@ -151,7 +187,10 @@ void [generated, codec, postgresOptions, invalidPool, sqliteOptions];\n`,
     types: ["node"],
     skipLibCheck: false,
   };
-  const program = ts.createProgram([fixture], options);
+  const program = ts.createProgram(
+    [fixture, ...(postgresWorkflow ? [path.join(consumer, "database/generated.ts")] : [])],
+    options,
+  );
   const diagnostics = ts.getPreEmitDiagnostics(program);
   assert.equal(
     diagnostics.length,
@@ -187,6 +226,9 @@ void [generated, codec, postgresOptions, invalidPool, sqliteOptions];\n`,
       removed: Object.values(contract.entrypoints).reduce((n, c) => n + c.removed.length, 0),
       privateSubpaths: contract.privateSubpaths.length,
       postgresPeers: ["8.23.0", "4.17.0"],
+      postgresWorkflow: postgresWorkflow
+        ? "installed generate, validate, unchanged generate; TS6/7 artifact"
+        : "not run without explicit test databases",
       sqliteScript: "complete, rollback, subsequent query",
     }),
   );

@@ -62,7 +62,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vp test run",
     "test:coverage": "vp test run --coverage",
-    "test:integration": "vp test run src/integration.test.ts",
+    "test:integration": "node tests/postgres-test-env.mjs && vp test run src/integration.test.ts src/tooling-integration.test.ts",
     "test:types": "npm run build && tsc -p tests/types/tsconfig.json",
     "test:publint": "publint",
     "pack:check": "npm pack --ignore-scripts --dry-run --json",

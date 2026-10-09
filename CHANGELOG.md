@@ -37,8 +37,20 @@
 - Transaction-owned migration plan/apply/resolve handles now reject use after
   their transaction ends, before any SQL can run on a released connection.
 
+- Complete PostgreSQL scratch reset with an actual database separation check,
+  session-owned workflow lock, normalized catalog introspection and protocol-only
+  query description. Unequal URL strings alone no longer authorize reset.
+- Normalize the desired PostgreSQL schema inside rollback-only scratch DDL,
+  preserving native type/default/expression semantics without comparing codecs
+  or application property names to database columns.
+- Quote enum type/schema names, emit one composite primary key, and defer initial
+  foreign keys until their referenced tables exist.
+- Generate conservative nullable query results and standard PostgreSQL parser
+  types (int8/numeric strings, timestamp/date Date, unknown unsupported types).
+- Gate real and normally installed generation/validation/no-op workflows against
+  isolated PostgreSQL 16, 17 and 18 scratch databases.
+
 ### Remaining release gate
 
-- PostgreSQL shadow reset/introspection/query description are incomplete in the
-  advertised generation/validation workflow (#55). No ORM 0.5.0 readiness or
-  publication claim is made until that real workflow is qualified.
+- Complete coordinated 0.5.0 packed-candidate and website qualification remains
+  pending. Maintainer review and approval are required before publication.

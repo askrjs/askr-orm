@@ -52,6 +52,7 @@ export interface SnapshotTable {
   readonly drop?: boolean;
   readonly columns: readonly SnapshotColumn[];
   readonly constraints: readonly TableConstraint[];
+  readonly primaryKeyColumns?: readonly string[];
 }
 
 /** Point-in-time serialized shape of a database schema, produced by {@link snapshotDefinition}. */
@@ -152,6 +153,13 @@ export function snapshotDefinition(
       constraints: [...(table.$options.constraints ?? [])].sort((left, right) =>
         JSON.stringify(left).localeCompare(JSON.stringify(right)),
       ),
+      ...(Object.values(table.$columns).filter((column) => column.ast.primaryKey).length > 1
+        ? {
+            primaryKeyColumns: Object.values(table.$columns)
+              .filter((column) => column.ast.primaryKey)
+              .map((column) => column.ast.name),
+          }
+        : {}),
     }))
     .sort((left, right) =>
       `${left.schema}.${left.name}`.localeCompare(`${right.schema}.${right.name}`),
@@ -233,10 +241,29 @@ function indexName(table: SnapshotTable, index: IndexDefinition, position: numbe
   return index.name ?? `${table.name}_${position + 1}_idx`;
 }
 
-function createTableSql(table: SnapshotTable, dialect: "postgres" | "sqlite" = "postgres"): string {
+function createTableSql(
+  table: SnapshotTable,
+  dialect: "postgres" | "sqlite" = "postgres",
+  deferReferences = false,
+): string {
   const inline = table.constraints.filter((entry) => entry.kind !== "index");
+  const primary =
+    table.primaryKeyColumns ??
+    table.columns.filter((column) => column.primaryKey).map((column) => column.name);
   const parts = [
-    ...table.columns.filter((column) => !column.drop).map((column) => columnSql(column, dialect)),
+    ...table.columns
+      .filter((column) => !column.drop)
+      .map((column) => {
+        const { reference: _reference, ...withoutReference } = column;
+        return columnSql(
+          {
+            ...(deferReferences ? withoutReference : column),
+            ...(primary.length > 1 ? { primaryKey: false } : {}),
+          },
+          dialect,
+        );
+      }),
+    ...(primary.length > 1 ? [`PRIMARY KEY (${primary.map(quoteIdentifier).join(", ")})`] : []),
     ...inline.map((constraint) => constraintSql(table, constraint)),
   ];
   const statements = [
@@ -264,6 +291,15 @@ function activeSnapshot(snapshot: SchemaSnapshot): SchemaSnapshot {
   };
 }
 
+function foreignKeysSql(table: SnapshotTable): string[] {
+  return table.columns
+    .filter((column) => !column.drop && column.reference)
+    .map((column) => {
+      const reference = column.reference!;
+      return `ALTER TABLE ${qualified(table.schema, table.name)} ADD FOREIGN KEY (${quoteIdentifier(column.name)}) REFERENCES ${qualified(reference.schema, reference.table)} (${quoteIdentifier(reference.column)});`;
+    });
+}
+
 function renderInitialSchema(
   snapshot: SchemaSnapshot,
   dialect: "postgres" | "sqlite" = "postgres",
@@ -284,7 +320,12 @@ function renderInitialSchema(
     );
   }
   for (const table of snapshot.tables.filter((entry) => !entry.drop)) {
-    statements.push(createTableSql(table, dialect));
+    statements.push(createTableSql(table, dialect, dialect === "postgres"));
+  }
+  if (dialect === "postgres") {
+    for (const table of snapshot.tables.filter((entry) => !entry.drop)) {
+      statements.push(...foreignKeysSql(table));
+    }
   }
   for (const view of snapshot.views) {
     statements.push(`CREATE VIEW ${qualified(view.schema, view.name, dialect)} AS\n${view.query};`);
@@ -312,6 +353,17 @@ export function diffSnapshots(
     return renderInitialSchema(desired, dialect);
   }
   const statements: string[] = [];
+  if (dialect === "postgres") {
+    const schemas = new Set(
+      [...desired.enums, ...desired.tables, ...desired.views].map((entry) => entry.schema),
+    );
+    const existingSchemas = new Set(
+      [...current.enums, ...current.tables, ...current.views].map((entry) => entry.schema),
+    );
+    for (const schema of [...schemas].sort())
+      if (schema !== "public" && !existingSchemas.has(schema))
+        statements.push(`CREATE SCHEMA IF NOT EXISTS ${quoteIdentifier(schema)};`);
+  }
   const currentEnums = byName(current.enums);
   const desiredEnums = byName(desired.enums);
   for (const value of desired.enums) {
@@ -342,6 +394,14 @@ export function diffSnapshots(
 
   const currentTables = byName(current.tables);
   const desiredTables = byName(desired.tables);
+  const newTables = desired.tables.filter(
+    (table) => !currentTables.has(`${table.schema}.${table.name}`) && !table.renamedFrom,
+  );
+  const foreignKeys: string[] = [];
+  for (const table of newTables) {
+    statements.push(createTableSql(table, dialect, dialect === "postgres"));
+    if (dialect === "postgres") foreignKeys.push(...foreignKeysSql(table));
+  }
   for (const table of desired.tables) {
     const declaredTable = desiredInput.tables.find(
       (entry) => entry.schema === table.schema && entry.name === table.name,
@@ -355,7 +415,6 @@ export function diffSnapshots(
       );
     }
     if (!existing) {
-      statements.push(createTableSql(table, dialect));
       continue;
     }
     const existingColumns = new Map(existing.columns.map((column) => [column.name, column]));
@@ -379,9 +438,12 @@ export function diffSnapshots(
             `Adding required column ${table.name}.${column.name} needs a default or manual migration.`,
           );
         }
+        const { reference: _reference, ...withoutReference } = column;
         statements.push(
-          `ALTER TABLE ${qualified(table.schema, table.name, dialect)} ADD COLUMN ${columnSql(column, dialect)};`,
+          `ALTER TABLE ${qualified(table.schema, table.name, dialect)} ADD COLUMN ${columnSql(dialect === "postgres" ? withoutReference : column, dialect)};`,
         );
+        if (dialect === "postgres" && column.reference)
+          foreignKeys.push(...foreignKeysSql({ ...table, columns: [column] }));
         continue;
       }
       if (old.dataType !== column.dataType) {
@@ -424,12 +486,14 @@ export function diffSnapshots(
         );
       }
     }
-    if (JSON.stringify(existing.constraints) !== JSON.stringify(table.constraints)) {
+    const renamed = table.renamedFrom || table.columns.some((column) => column.renamedFrom);
+    if (!renamed && JSON.stringify(existing.constraints) !== JSON.stringify(table.constraints)) {
       throw new Error(
         `Changing constraints or indexes on ${table.name} requires a manual migration.`,
       );
     }
   }
+  statements.push(...foreignKeys);
   for (const table of current.tables) {
     if (desiredTables.has(`${table.schema}.${table.name}`)) continue;
     const renamed = desiredInput.tables.some(
@@ -617,6 +681,14 @@ async function describeRegisteredQueries(
     const parameters = [...query.parameters];
     const compiled = query.compile(Object.fromEntries(parameters.map((name) => [name, null])));
     const described = await scratch.describe(compiled.text, parameters);
+    const columnNames = new Set<string>();
+    for (const column of described.columns) {
+      if (columnNames.has(column.name))
+        throw new Error(
+          `Registered query ${query.key} has duplicate output column ${column.name}; give each result column an explicit unique alias.`,
+        );
+      columnNames.add(column.name);
+    }
     descriptions.push({
       key: query.key,
       source: compiled.text,
@@ -627,34 +699,44 @@ async function describeRegisteredQueries(
   return descriptions.sort((left, right) => left.key.localeCompare(right.key));
 }
 
-function tsType(dataType: string, nullable: boolean): string {
+function tsType(dataType: string, nullable: boolean, dialect: "postgres" | "sqlite"): string {
   const normalized = dataType.toLowerCase();
   const base =
     normalized === "boolean"
       ? "boolean"
       : /^(?:smallint|integer|real|double precision)$/.test(normalized)
         ? "number"
-        : normalized === "bigint"
-          ? "bigint"
+        : normalized === "bigint" || normalized.startsWith("numeric")
+          ? "string"
           : normalized === "bytea"
             ? "Uint8Array"
-            : /^(?:json|jsonb)$/.test(normalized)
-              ? "unknown"
-              : "string";
+            : dialect === "postgres" &&
+                /^(?:date|timestamp(?:\(\d+\))? (?:with|without) time zone)$/.test(normalized)
+              ? "Date"
+              : /^(?:json|jsonb)$/.test(normalized)
+                ? "unknown"
+                : /^(?:text|uuid|character(?: varying)?(?:\(\d+\))?|time(?:\(\d+\))? (?:with|without) time zone)$/.test(
+                      normalized,
+                    )
+                  ? "string"
+                  : "unknown";
   return nullable ? `${base} | null` : base;
 }
 
-function renderQueries(descriptions: readonly KeyedSqlDescription[]): string {
+function renderQueries(
+  descriptions: readonly KeyedSqlDescription[],
+  dialect: "postgres" | "sqlite",
+): string {
   const lines = ["export interface GeneratedDatabaseQueries {"];
   for (const query of descriptions) {
     lines.push(`  readonly ${JSON.stringify(query.key)}: {`);
     lines.push("    readonly parameters: {");
-    for (const parameter of query.parameters)
+    for (const parameter of new Set(query.parameters))
       lines.push(`      readonly ${JSON.stringify(parameter)}: unknown;`);
     lines.push("    };", "    readonly row: {");
     for (const column of query.columns) {
       lines.push(
-        `      readonly ${JSON.stringify(column.name)}: ${tsType(column.dataType, column.nullable)};`,
+        `      readonly ${JSON.stringify(column.name)}: ${tsType(column.dataType, column.nullable, dialect)};`,
       );
     }
     lines.push("    };", "  };");
@@ -664,7 +746,7 @@ function renderQueries(descriptions: readonly KeyedSqlDescription[]): string {
 }
 
 function generatedArtifacts(
-  _database: LoadedDatabase,
+  database: LoadedDatabase,
   snapshot: SchemaSnapshot,
   descriptions: readonly KeyedSqlDescription[],
   manifest: MigrationManifest,
@@ -674,7 +756,7 @@ function generatedArtifacts(
     "// Generated by @askrjs/orm. Do not edit.",
     'import type { GeneratedDatabaseArtifact } from "@askrjs/orm";',
     "",
-    renderQueries(descriptions).trimEnd(),
+    renderQueries(descriptions, database.definition.dialect).trimEnd(),
     "",
     `export const generated = ${JSON.stringify({ schemaIdentity: identity, manifest, queries: Object.fromEntries(descriptions.map((query) => [query.key, { parameters: query.parameters, columns: query.columns }])) }, null, 2)} as const satisfies GeneratedDatabaseArtifact;`,
     "",
@@ -701,8 +783,8 @@ async function replay(database: LoadedDatabase): Promise<{
     await scratch.close?.();
     throw new Error("Scratch adapter identity does not match configured scratchIdentity.");
   }
-  const manifest = await readMigrations(database.databaseDir);
   try {
+    const manifest = await readMigrations(database.databaseDir);
     await scratch.reset();
     for (const migration of manifest.migrations) await scratch.execute(migration.sql);
     const current = (await scratch.introspect()) as SchemaSnapshot;
@@ -723,12 +805,116 @@ async function writeArtifacts(
   await fs.writeFile(path.join(database.databaseDir, GENERATED_FILE), artifacts, "utf8");
 }
 
+/** Let PostgreSQL normalize types/expressions; roll back all probe DDL before diffing. */
+async function desiredPhysicalSnapshot(
+  database: LoadedDatabase,
+  scratch: DatabaseToolingAdapter,
+  current: SchemaSnapshot,
+  declared: SchemaSnapshot,
+): Promise<SchemaSnapshot> {
+  if (database.definition.dialect !== "postgres") return declared;
+  await scratch.execute("BEGIN");
+  let failed = false;
+  let primaryError: unknown;
+  let result: SchemaSnapshot | undefined;
+  try {
+    for (const view of current.views)
+      await scratch.execute(`DROP VIEW IF EXISTS ${qualified(view.schema, view.name)} CASCADE`);
+    for (const table of current.tables)
+      await scratch.execute(`DROP TABLE IF EXISTS ${qualified(table.schema, table.name)} CASCADE`);
+    for (const value of current.enums)
+      await scratch.execute(`DROP TYPE IF EXISTS ${qualified(value.schema, value.name)} CASCADE`);
+    await scratch.execute(renderInitialSchema(activeSnapshot(declared), "postgres"));
+    const physical = (await scratch.introspect()) as SchemaSnapshot;
+    result = {
+      ...physical,
+      tables: physical.tables.map((table) => {
+        const definition = declared.tables.find(
+          (entry) => entry.name === table.name && entry.schema === table.schema,
+        )!;
+        return {
+          ...table,
+          ...(definition.renamedFrom ? { renamedFrom: definition.renamedFrom } : {}),
+          columns: table.columns.map((column) => {
+            const original = definition.columns.find((entry) => entry.name === column.name)!;
+            return {
+              ...column,
+              ...(original.renamedFrom ? { renamedFrom: original.renamedFrom } : {}),
+              ...(original.convertUsing ? { convertUsing: original.convertUsing } : {}),
+            };
+          }),
+        };
+      }),
+    };
+  } catch (error) {
+    failed = true;
+    primaryError = error;
+  }
+  try {
+    await scratch.execute("ROLLBACK");
+  } catch (error) {
+    if (!failed) {
+      failed = true;
+      primaryError = error;
+    }
+  }
+  if (failed) throw primaryError;
+  return result!;
+}
+
+/** Rename/conversion instructions are intent, never physical schema facts. */
+function comparisonSnapshot(snapshot: SchemaSnapshot, declared: SchemaSnapshot): SchemaSnapshot {
+  return {
+    ...snapshot,
+    tables: snapshot.tables.map((table) => {
+      const definition = declared.tables.find(
+        (entry) =>
+          entry.schema === table.schema &&
+          (entry.name === table.name || entry.renamedFrom === table.name),
+      );
+      const explicitNames = new Set(
+        definition?.constraints
+          .map((constraint) => constraint.name)
+          .filter((name) => name !== undefined),
+      );
+      return {
+        ...table,
+        constraints: table.constraints
+          .map((constraint) => {
+            const { name, ...unnamed } = constraint;
+            return name && explicitNames.has(name) ? constraint : unnamed;
+          })
+          .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
+      };
+    }),
+  };
+}
+
+function physicalIdentity(snapshot: SchemaSnapshot, declared: SchemaSnapshot): string {
+  const comparable = comparisonSnapshot(snapshot, declared);
+  return stableJson({
+    ...activeSnapshot(comparable),
+    tables: activeSnapshot(comparable).tables.map(({ renamedFrom: _rename, ...table }) => ({
+      ...table,
+      columns: table.columns.map(
+        ({ renamedFrom: _columnRename, convertUsing: _convert, ...column }) => column,
+      ),
+    })),
+  });
+}
+
 async function validateOne(database: LoadedDatabase): Promise<void> {
   const desired = activeSnapshot(snapshotDefinition(database.definition));
   const replayed = await replay(database);
   try {
     const actual = activeSnapshot(replayed.current);
-    if (stableJson(actual) !== stableJson(desired)) {
+    const physical = await desiredPhysicalSnapshot(
+      database,
+      replayed.scratch,
+      replayed.current,
+      desired,
+    );
+    if (physicalIdentity(actual, desired) !== physicalIdentity(physical, desired)) {
       throw new Error("Migration history does not produce the TypeScript schema definition.");
     }
     const descriptions = await describeRegisteredQueries(database.definition, replayed.scratch);
@@ -758,7 +944,17 @@ async function generateOne(database: LoadedDatabase): Promise<string | null> {
   const replayed = await replay(database);
   let created: string | null = null;
   try {
-    const delta = diffSnapshots(replayed.current, desired, database.definition.dialect);
+    const physical = await desiredPhysicalSnapshot(
+      database,
+      replayed.scratch,
+      replayed.current,
+      desired,
+    );
+    const delta = diffSnapshots(
+      comparisonSnapshot(replayed.current, desired),
+      comparisonSnapshot(physical, desired),
+      database.definition.dialect,
+    );
     if (delta) {
       const id = ulid();
       const parent = replayed.manifest.migrations.at(-1)?.id ?? null;
@@ -773,7 +969,7 @@ async function generateOne(database: LoadedDatabase): Promise<string | null> {
       await replayed.scratch.execute(content);
     }
     const finalSnapshot = activeSnapshot((await replayed.scratch.introspect()) as SchemaSnapshot);
-    if (stableJson(finalSnapshot) !== stableJson(activeSnapshot(desired))) {
+    if (physicalIdentity(finalSnapshot, desired) !== physicalIdentity(physical, desired)) {
       throw new Error("Generated migration did not produce the desired schema.");
     }
     const manifest = await readMigrations(database.databaseDir);
@@ -792,7 +988,13 @@ async function refreshGenerated(database: LoadedDatabase): Promise<void> {
   const desired = activeSnapshot(snapshotDefinition(database.definition));
   const replayed = await replay(database);
   try {
-    if (stableJson(activeSnapshot(replayed.current)) !== stableJson(desired)) {
+    const physical = await desiredPhysicalSnapshot(
+      database,
+      replayed.scratch,
+      replayed.current,
+      desired,
+    );
+    if (physicalIdentity(replayed.current, desired) !== physicalIdentity(physical, desired)) {
       throw new Error(
         "Manual migration history does not produce the TypeScript schema definition.",
       );

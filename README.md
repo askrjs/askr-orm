@@ -98,10 +98,13 @@ askr database migration plan
 askr database migration apply --yes
 ```
 
-The PostgreSQL generated-artifact workflow is a 0.5.0 release blocker tracked in
-[#55](https://github.com/askrjs/askr-orm/issues/55): the shipped shadow reset,
-introspection and description methods are incomplete. Ordinary runtime access
-and application of an already bundled migration manifest are covered separately.
+PostgreSQL generated-artifact tooling uses a disposable scratch database and
+proves actual separation from the target before reset. It normalizes supported
+catalog shapes and describes query results without executing application queries.
+See [PostgreSQL tooling](docs/postgres-tooling.md) for reset scope, supported
+objects, conservative result types and connection requirements. Native and
+installed PostgreSQL 16–18 CI lanes qualify the workflow. Complete coordinated
+0.5.0 candidate qualification and maintainer review are still required.
 
 Generation replays checksummed, forward-only SQL against the shadow database
 before accepting it. It writes migration SQL plus one committed
@@ -122,5 +125,5 @@ cannot be interrupted.
 
 The [API decisions](docs/0.5.0-api.md) record every retained and removed name and
 its migration. The [hardening report](docs/0.5.0-hardening.md) distinguishes
-regression fixes, executed characterization and the remaining release blocker.
+regression fixes, executed characterization and the remaining coordinated release gates.
 The package version remains 0.4.0 until the coordinated candidate is prepared.

@@ -75,6 +75,7 @@ jobs:
           --health-retries 10
     env:
       ASKR_ORM_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/askr_orm_test
+      ASKR_ORM_TEST_SHADOW_URL: postgresql://postgres:postgres@127.0.0.1:5432/askr_orm_test_shadow
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -87,5 +88,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Create isolated scratch database
+        run: node tests/prepare-postgres.mjs
+
       - name: Run PostgreSQL integration tests
         run: npm run test:integration
+
+      - name: Qualify installed PostgreSQL generation with minimum peers
+        run: npm run test:packed

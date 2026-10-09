@@ -162,6 +162,8 @@
     "sql",
     "tooling-impl",
     "dist/index.js",
-    "dist/tooling-impl.js"
+    "dist/tooling-impl.js",
+    "postgres-client",
+    "postgres-tooling"
   ]
 }
