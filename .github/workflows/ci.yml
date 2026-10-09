@@ -10,8 +10,13 @@ permissions:
   contents: read
 
 jobs:
-  package:
-    runs-on: ubuntu-latest
+  package-platform:
+    name: package (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -24,8 +29,29 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Format check
+        run: npm run fmt -- --check
+
       - name: Run package gate
         run: npm run check
+
+      - name: Upload implementation coverage
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: orm-coverage-${{ matrix.os }}
+          path: coverage
+          if-no-files-found: warn
+
+  package:
+    needs: package-platform
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every platform package gate
+        env:
+          PACKAGE_RESULT: ${{ needs.package-platform.result }}
+        run: test "$PACKAGE_RESULT" = success
 
   postgres-contract:
     name: PostgreSQL ${{ matrix.postgres }}

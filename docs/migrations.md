@@ -45,3 +45,11 @@ changes unless the definition carries supported explicit intent. Use
 Opening a database never applies migrations. Programmatic `plan()` and
 `apply()` use the same manifest, ledger checks, session lock, and transaction
 rules as the CLI, but never prompt.
+
+Migration replay uses the driver's complete-script boundary: quoted semicolons
+remain SQL text and are never split by an application parser. If a transactional
+statement fails, all preceding DDL/data and the applied ledger entry roll back.
+A failed rollback quarantines the connection. PostgreSQL discards the poisoned
+pool client; SQLite closes the failed adapter and rolls back its remaining writes.
+Open a new SQLite adapter before retrying. Non-transactional scripts retain their
+explicit partial-state/resolve policy described above.

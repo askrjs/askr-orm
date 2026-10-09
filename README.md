@@ -73,7 +73,10 @@ their scalar value. Writes return status by default. Ordinary promises are the
 non-atomic coordination mechanism; use `db.transaction(...)` when operations
 must be atomic. Nested transactions use savepoints, and a transaction client
 throws after its callback completes. If rollback cleanup itself fails, the
-original callback error remains the error surfaced to the caller.
+original callback error remains the error surfaced to the caller. Failed
+PostgreSQL cleanup discards the pooled connection; failed SQLite rollback
+quarantines the adapter and closes its database. If physical close fails, explicit
+close retries cleanup. Open a new SQLite adapter before retrying application work.
 
 `escapeLikePattern()` escapes `\\`, `%`, and `_` for literal-text searches.
 `like()` and `ilike()` bind the pattern and emit the matching `ESCAPE '\\'`
@@ -95,6 +98,11 @@ askr database migration plan
 askr database migration apply --yes
 ```
 
+The PostgreSQL generated-artifact workflow is a 0.5.0 release blocker tracked in
+[#55](https://github.com/askrjs/askr-orm/issues/55): the shipped shadow reset,
+introspection and description methods are incomplete. Ordinary runtime access
+and application of an already bundled migration manifest are covered separately.
+
 Generation replays checksummed, forward-only SQL against the shadow database
 before accepting it. It writes migration SQL plus one committed
 `database/generated.ts` artifact containing schema identity, migration
@@ -109,3 +117,10 @@ SQLite uses Node's synchronous `node:sqlite` API behind a re-entrant async
 connection queue. Transactions and streams hold the connection; cancellation
 is checked between streamed rows, but a synchronous statement already running
 cannot be interrupted.
+
+## 0.5.0 review
+
+The [API decisions](docs/0.5.0-api.md) record every retained and removed name and
+its migration. The [hardening report](docs/0.5.0-hardening.md) distinguishes
+regression fixes, executed characterization and the remaining release blocker.
+The package version remains 0.4.0 until the coordinated candidate is prepared.

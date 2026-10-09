@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { diffSnapshots, runDatabaseCli, type SchemaSnapshot } from "./tooling";
+import { diffSnapshots, runDatabaseCli, type SchemaSnapshot } from "./tooling-impl";
 
 const temporaryDirectories: string[] = [];
 
@@ -122,7 +122,7 @@ describe("schema migration generation", () => {
 describe("database CLI", () => {
   it("should generate, byte-validate, and no-op regenerate a flat project", async () => {
     const packageRoot = path.resolve(import.meta.dirname, "..");
-    const root = await fs.mkdtemp(path.join(packageRoot, ".orm-fixture-"));
+    const root = await fs.mkdtemp(path.join(packageRoot, ".orm-fixture- #% "));
     temporaryDirectories.push(root);
     await fs.mkdir(path.join(root, "database"), { recursive: true });
     await fs.writeFile(
@@ -169,12 +169,12 @@ export default defineDatabase({
       error: (value: unknown = "") => logs.push(`ERROR ${String(value)}`),
     };
 
-    expect(await runDatabaseCli(["generate"], { cwd: root, io })).toBe(0);
+    expect(await runDatabaseCli(["generate"], { cwd: root, io }), logs.join("\n")).toBe(0);
     expect(logs.at(-1)).toMatch(/generated/);
     expect((await fs.readdir(path.join(root, "database", "migrations"))).length).toBe(1);
-    expect(await runDatabaseCli(["validate"], { cwd: root, io })).toBe(0);
+    expect(await runDatabaseCli(["validate"], { cwd: root, io }), logs.join("\n")).toBe(0);
     expect(logs.at(-1)).toBe("default: valid");
-    expect(await runDatabaseCli(["generate"], { cwd: root, io })).toBe(0);
+    expect(await runDatabaseCli(["generate"], { cwd: root, io }), logs.join("\n")).toBe(0);
     expect(logs.at(-1)).toBe("default: unchanged");
 
     const generated = await fs.readFile(path.join(root, "database", "generated.ts"), "utf8");

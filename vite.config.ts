@@ -1,6 +1,14 @@
 import { defineConfig } from "vite-plus";
 
 export default defineConfig({
+  test: {
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "json-summary", "html"],
+      include: ["src/**/*.ts"],
+      exclude: ["src/**/*.test.ts", "src/**/*.fixture.ts"],
+    },
+  },
   pack: {
     entry: {
       index: "src/index.ts",

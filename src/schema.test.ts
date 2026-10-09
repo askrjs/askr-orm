@@ -1,8 +1,8 @@
+import { toSnakeCase } from "./naming";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   table,
   text,
-  toSnakeCase,
   uuid,
   type Codec,
   type InferInsert,

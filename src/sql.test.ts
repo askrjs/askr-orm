@@ -1,17 +1,6 @@
+import { compileKeyedSql, keyedSql } from "./sql";
 import { describe, expect, it } from "vitest";
-import {
-  and,
-  columnRef,
-  compileKeyedSql,
-  compileSql,
-  eq,
-  escapeLikePattern,
-  identifier,
-  inArray,
-  like,
-  literal,
-  sql,
-} from "./index";
+import { and, columnRef, compileSql, eq, escapeLikePattern, inArray, like, sql } from "./index";
 import { rewritePlaceholders, sqlStructure } from "./placeholders";
 
 describe("SQL boundaries", () => {
@@ -31,7 +20,7 @@ describe("SQL boundaries", () => {
   it("should parameterize values and quote generated identifiers", () => {
     const input = `x'); DROP TABLE users; --`;
     expect(
-      compileSql(sql`SELECT * FROM ${identifier("user data")} WHERE email = ${input}`),
+      compileSql(sql`SELECT * FROM ${sql.identifier("user data")} WHERE email = ${input}`),
     ).toEqual({
       text: 'SELECT * FROM "user data" WHERE email = $1',
       values: [input],
@@ -58,18 +47,18 @@ describe("SQL boundaries", () => {
   });
 
   it("should require static keyed SQL and reuse repeated named parameters", () => {
-    const query = sql.key("users.by-email", { email: "" })`
+    const query = keyedSql("users.by-email", { email: "" })`
       SELECT id FROM users WHERE email = :email OR backup_email = :email
     `;
     expect(compileKeyedSql(query, { email: "a@example.com" })).toEqual({
       text: "\n      SELECT id FROM users WHERE email = $1 OR backup_email = $1\n    ",
       values: ["a@example.com"],
     });
-    expect(() => sql.key("bad key", {})``).toThrow(/Invalid keyed SQL key/);
+    expect(() => keyedSql("bad key", {})``).toThrow(/Invalid keyed SQL key/);
   });
 
   it("should replace only structural named parameters given inert SQL regions", () => {
-    const exact = sql.key("notes.search", { email: "" })`
+    const exact = keyedSql("notes.search", { email: "" })`
       SELECT id FROM users WHERE note = 'contact via :email for help' AND email = :email
     `;
     expect(compileKeyedSql(exact, { email: "attacker@example.com" })).toEqual({
@@ -102,7 +91,7 @@ describe("SQL boundaries", () => {
   });
 
   it("should keep placeholder-like text inert across escaped and JSON-shaped values", () => {
-    const query = sql.key("documents.by-id", { id: "", payload: {} })`
+    const query = keyedSql("documents.by-id", { id: "", payload: {} })`
       SELECT ':id', E'escaped\\:id', payload FROM documents
       WHERE payload = :payload::jsonb AND id = :id
     `;
@@ -115,11 +104,15 @@ describe("SQL boundaries", () => {
   });
 
   it("should quote embedded identifier delimiters and preserve edge finite literals", () => {
-    expect(compileSql(sql`SELECT ${identifier('odd"name')} AS ${identifier("select")}`)).toEqual({
+    expect(
+      compileSql(sql`SELECT ${sql.identifier('odd"name')} AS ${sql.identifier("select")}`),
+    ).toEqual({
       text: 'SELECT "odd""name" AS "select"',
       values: [],
     });
-    expect(compileSql(sql`SELECT ${literal(-0)}, ${literal(Number.MAX_SAFE_INTEGER)}`)).toEqual({
+    expect(
+      compileSql(sql`SELECT ${sql.literal(-0)}, ${sql.literal(Number.MAX_SAFE_INTEGER)}`),
+    ).toEqual({
       text: "SELECT 0, 9007199254740991",
       values: [],
     });
@@ -131,13 +124,13 @@ describe("SQL boundaries", () => {
 
   it("should reject non-finite numbers given SQL literal formatting", () => {
     for (const value of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
-      expect(() => compileSql(sql`SELECT ${literal(value)}`)).toThrow(/finite number/i);
+      expect(() => compileSql(sql`SELECT ${sql.literal(value)}`)).toThrow(/finite number/i);
     }
   });
 
   it("should reject integer literals whose precision cannot be represented", () => {
     for (const value of [Number.MAX_SAFE_INTEGER + 1, Number.MIN_SAFE_INTEGER - 1]) {
-      expect(() => compileSql(sql`SELECT ${literal(value)}`)).toThrow(/safe integer/i);
+      expect(() => compileSql(sql`SELECT ${sql.literal(value)}`)).toThrow(/safe integer/i);
     }
   });
 });

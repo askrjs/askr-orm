@@ -604,6 +604,7 @@ export function createDatabaseClient<
         new TableClient(definition, effectiveAdapter, options.telemetry),
       ]),
     ) as DatabaseTables<T>;
+    const migrations = createMigrationsApi(currentAdapter, manifest);
     return Object.assign(clients, {
       queries: Object.fromEntries(
         Object.entries(registeredQueries).map(([name, query]) => [
@@ -614,7 +615,20 @@ export function createDatabaseClient<
           },
         ]),
       ) as QueryFunctions<Q>,
-      migrations: createMigrationsApi(currentAdapter, manifest),
+      migrations: {
+        async plan(queryOptions) {
+          assertActive();
+          return migrations.plan(queryOptions);
+        },
+        async apply(applyOptions) {
+          assertActive();
+          return migrations.apply(applyOptions);
+        },
+        async resolve(id, resolution, queryOptions) {
+          assertActive();
+          return migrations.resolve(id, resolution, queryOptions);
+        },
+      } satisfies MigrationsApi,
       transaction: <R>(
         callback: (database: DatabaseClient<T, Q>) => Promise<R>,
         transactionOptions?: TransactionOptions,

@@ -1,6 +1,7 @@
+import { createDatabaseClient } from "./client";
 import { describe, expect, it } from "vitest";
 import type { DatabaseAdapter, ExecutionResult, QueryOptions, TransactionOptions } from "./adapter";
-import { columnRef, createDatabaseClient, eq, table, text, uuid } from "./index";
+import { columnRef, eq, table, text, uuid } from "./index";
 import type { SqlQuery } from "./sql";
 
 class RecordingAdapter implements DatabaseAdapter {

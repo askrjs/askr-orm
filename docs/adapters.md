@@ -6,6 +6,11 @@ The runtime and tooling adapters are deliberately separate.
 
 - `execute` accepts parameterized `{ text, values }` and optional cancellation,
   timeout, and prepared-statement name.
+- `executeScript` is optional and executes the complete parameter-free SQL script
+  supplied by a migration. PostgreSQL ignores multi-statement result sets and
+  SQLite uses DatabaseSync.exec. Drivers without this method retain the existing
+  execute fallback and must supply complete-script semantics themselves. This is
+  a migration boundary; ordinary execute still returns one query result.
 - `transaction` owns `BEGIN`, isolation/read-only settings, commit, and
   rollback.
 - `session` pins a physical database session.
@@ -23,7 +28,7 @@ interpolate application data. Placeholder rendering is dialect-owned.
 - `identity` is a stable, non-secret database identity.
 - `reset` destroys and recreates only the isolated scratch schema/database.
 - `execute` replays migration SQL.
-- `introspect` returns the canonical `SchemaSnapshot`.
+- `introspect` returns the canonical schema snapshot expected by the private CLI implementation.
 - `describe` uses PostgreSQL prepared-statement description and returns
   parameter and result metadata without running application data queries.
 
