@@ -13,7 +13,16 @@ const state = vi.hoisted(() => ({
 
 vi.mock("pg", () => {
   class Pool {
-    async query(config: string | { text?: string }) {
+    async query(
+      config:
+        | string
+        | { text?: string; sql?: string; submit?: unknown; handleReadyForQuery?: () => void },
+    ) {
+      if (typeof config !== "string" && typeof config.submit === "function") {
+        state.statements.push(config.sql === undefined ? "DESCRIBE" : `PARSE ${config.sql}`);
+        config.handleReadyForQuery?.();
+        return { rows: [], rowCount: 0 };
+      }
       const statement = typeof config === "string" ? config : (config.text ?? "");
       state.statements.push(statement);
       if (state.failRollback && statement === "ROLLBACK") throw new Error("rollback failed");
@@ -75,10 +84,11 @@ describe("PostgreSQL adapter", () => {
     }).shadow();
     await shadow.describe("SELECT $1::text AS value", ["value"]);
     await shadow.describe("SELECT $1::text AS value", ["value"]);
-    expect(state.statements.filter((sql) => sql.startsWith("PREPARE"))).toHaveLength(2);
+    expect(state.statements.filter((sql) => sql.startsWith("PARSE"))).toHaveLength(2);
     expect(state.statements.filter((sql) => sql === "DEALLOCATE askr_describe")).toHaveLength(2);
-    expect(state.releases).toBe(2);
+    expect(state.releases).toBe(0);
     await shadow.close?.();
+    expect(state.releases).toBe(1);
   });
 
   it("should make runtime close idempotent", async () => {
@@ -144,8 +154,9 @@ describe("PostgreSQL adapter", () => {
     await expect(shadow.describe("SELECT $1::text", ["value"])).resolves.toMatchObject({
       parameters: ["value"],
     });
-    expect(state.releases).toBe(2);
+    expect(state.releases).toBe(1);
     await shadow.close?.();
+    expect(state.releases).toBe(2);
   });
 
   it("should preserve the callback error when rollback fails", async () => {

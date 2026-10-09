@@ -53,7 +53,7 @@ describe("schema definitions", () => {
 
   it("should define Postgres enum columns", () => {
     const status = postgresEnum("account_status", ["active", "disabled"]);
-    expect(status.column().ast.dataType).toBe("public.account_status");
+    expect(status.column().ast.dataType).toBe('"public"."account_status"');
   });
 
   it("should infer readonly rows, inserts, patches, and primary keys", () => {

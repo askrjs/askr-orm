@@ -34,6 +34,10 @@ interpolate application data. Placeholder rendering is dialect-owned.
 
 Set `targetIdentity` and `scratchIdentity` in `database/index.ts`. Tooling
 checks these before reset or target migration work and fails closed on a match.
+The built-in PostgreSQL driver additionally proves actual target/scratch
+separation before reset and owns a pinned scratch workflow session. See
+[PostgreSQL tooling](postgres-tooling.md) for destructive reset scope, supported
+catalog shapes, conservative query metadata and connection requirements.
 
 Driver errors may pass through the adapter. The ORM normalizes PostgreSQL
 constraint, serialization, deadlock, timeout, cancellation, and connection
