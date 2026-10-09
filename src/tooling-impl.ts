@@ -558,7 +558,7 @@ async function loadDatabases(cwd: string): Promise<{
   readonly projectRoot: string;
 }> {
   const location = await findDatabaseEntry(cwd);
-  const module = (await tsImport(path.join(location.databaseDir, "index.ts"), {
+  const module = (await tsImport(pathToFileURL(path.join(location.databaseDir, "index.ts")).href, {
     parentURL: pathToFileURL(location.projectRoot).href,
   })) as Record<string, unknown>;
   const exported = module.default ?? module.database;

@@ -70,6 +70,11 @@ try {
       await assert.rejects(db.transaction(async tx => { await tx.items.insert({ id: 3, value: 'discard' }); throw primary; }), error => error === primary);
       assert.equal((await db.items.select(({ items }) => items).execute()).length, 2);
       assert.equal((await db.migrations.plan()).pending.length, 0);
+      let retiredMigrations;
+      await db.transaction(async tx => { retiredMigrations = tx.migrations; });
+      await assert.rejects(retiredMigrations.plan(), /Transaction client is no longer active/);
+      await assert.rejects(retiredMigrations.apply(), /Transaction client is no longer active/);
+      await assert.rejects(retiredMigrations.resolve('01SCRIPT', 'applied'), /Transaction client is no longer active/);
     } finally { await db.close(); }
   `,
   );

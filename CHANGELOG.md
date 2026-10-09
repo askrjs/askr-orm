@@ -31,6 +31,12 @@
 - Update compatible development tooling to audited versions and add TypeScript 6 compiler-API audits alongside the TypeScript 7 gate and pin
   the matching coverage provider.
 
+- Load CLI database entries through file URLs so Windows drive paths and reserved
+  URL characters in project directories remain filesystem paths.
+
+- Transaction-owned migration plan/apply/resolve handles now reject use after
+  their transaction ends, before any SQL can run on a released connection.
+
 ### Remaining release gate
 
 - PostgreSQL shadow reset/introspection/query description are incomplete in the
