@@ -1,5 +1,6 @@
+import { normalizeDatabaseError } from "./errors";
 import { describe, expect, it } from "vitest";
-import { DatabaseError, normalizeDatabaseError } from "./index";
+import { DatabaseError } from "./index";
 
 describe("database errors", () => {
   it.each([

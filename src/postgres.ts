@@ -57,7 +57,17 @@ class CheckedOutClient {
     return this.client.query(query as never) as T;
   }
 
-  release(): void {
+  async cleanup(statement: string): Promise<void> {
+    try {
+      await this.query(statement);
+    } catch (error) {
+      // A failed rollback/unlock cannot leave a reusable pooled connection.
+      this.failure ??= normalizeDatabaseError(error);
+    }
+  }
+
+  release(error?: unknown): void {
+    if (error !== undefined) this.failure ??= normalizeDatabaseError(error);
     this.client.off("error", this.onError);
     this.client.release(this.failure);
   }
@@ -86,6 +96,15 @@ class PgAdapter implements DatabaseAdapter {
       ...(options.timeoutMs ? { query_timeout: options.timeoutMs } : {}),
     });
     return { rows: result.rows as Row[], rowCount: result.rowCount ?? result.rows.length };
+  }
+
+  async executeScript(sql: string, options: QueryOptions = {}): Promise<void> {
+    if (options.signal?.aborted) throw options.signal.reason;
+    await this.executor.query({
+      text: sql,
+      ...(options.signal ? { signal: options.signal } : {}),
+      ...(options.timeoutMs ? { query_timeout: options.timeoutMs } : {}),
+    });
   }
 
   async *stream<Row>(query: SqlQuery, options: QueryOptions = {}): AsyncIterable<Row> {
@@ -134,8 +153,8 @@ class PgAdapter implements DatabaseAdapter {
         await this.client.query(`RELEASE SAVEPOINT ${savepoint}`);
         return value;
       } catch (error) {
-        await this.client.query(`ROLLBACK TO SAVEPOINT ${savepoint}`).catch(() => undefined);
-        await this.client.query(`RELEASE SAVEPOINT ${savepoint}`).catch(() => undefined);
+        await this.client.cleanup(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+        await this.client.cleanup(`RELEASE SAVEPOINT ${savepoint}`);
         throw error;
       }
     }
@@ -154,14 +173,14 @@ class PgAdapter implements DatabaseAdapter {
       await client.query("COMMIT");
       return value;
     } catch (error) {
-      await client.query("ROLLBACK").catch(() => undefined);
+      await client.cleanup("ROLLBACK");
       throw error;
     } finally {
       owned?.release();
     }
   }
 
-  async session<T>(callback: (adapter: DatabaseAdapter) => Promise<T>): Promise<T> {
+  async session<T>(callback: (adapter: PgAdapter) => Promise<T>): Promise<T> {
     if (this.client) return callback(this);
     if (!this.pool) throw new Error("PostgreSQL sessions require a pool.");
     const client = new CheckedOutClient(await this.pool.connect());
@@ -180,9 +199,7 @@ class PgAdapter implements DatabaseAdapter {
       try {
         return await callback(session);
       } finally {
-        await session
-          .execute({ text: `SELECT pg_advisory_unlock(${MIGRATION_LOCK_KEY})`, values: [] })
-          .catch(() => undefined);
+        await session.client!.cleanup(`SELECT pg_advisory_unlock(${MIGRATION_LOCK_KEY})`);
       }
     });
   }
@@ -235,14 +252,18 @@ async function pgTooling(
     },
     async describe(sql, parameterNames) {
       const client = new CheckedOutClient(await pool.connect());
-      let prepared = false;
+      let cleanupError: unknown;
       try {
         await client.query(`PREPARE askr_describe AS ${sql}`);
-        prepared = true;
+        try {
+          await client.query("DEALLOCATE askr_describe");
+        } catch (error) {
+          cleanupError = error;
+          throw error;
+        }
         return { parameters: [...parameterNames], columns: [] };
       } finally {
-        if (prepared) await client.query("DEALLOCATE askr_describe");
-        client.release();
+        client.release(cleanupError);
       }
     },
     async close() {

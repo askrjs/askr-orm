@@ -24,7 +24,9 @@
   },
   "files": [
     "dist/**/*.js",
-    "dist/**/*.d.ts"
+    "dist/**/*.d.ts",
+    "docs/*.md",
+    "CHANGELOG.md"
   ],
   "type": "module",
   "sideEffects": false,
@@ -64,9 +66,10 @@
     "test:types": "npm run build && tsc -p tests/types/tsconfig.json",
     "test:publint": "publint",
     "pack:check": "npm pack --ignore-scripts --dry-run --json",
-    "check": "npm run lint && npm run test:coverage && npm run test:types && npm run build && npm run bench && npm run test:publint && npm run pack:check",
+    "check": "npm run lint && npm run test:coverage && npm run test:types && npm run test:packed && npm run build && npm run bench && npm run test:publint && npm run pack:check",
     "prepack": "npm run build",
-    "prepublishOnly": "npm run check"
+    "prepublishOnly": "npm run check",
+    "test:packed": "npm run build && node tests/packed-contract.mjs"
   },
   "dependencies": {
     "tsx": "^4.23.12"
@@ -74,11 +77,12 @@
   "devDependencies": {
     "@types/node": "^26.3.0",
     "@types/pg": "^8.23.1",
-    "@vitest/coverage-v8": "^4.1.11",
+    "@typescript/typescript6": "npm:typescript@6.0.2",
+    "@vitest/coverage-v8": "4.1.11",
     "pg": "^8.23.0",
     "pg-query-stream": "^4.17.0",
     "publint": "^0.3.24",
-    "typescript": "^7.0.2",
+    "typescript": "7.0.2",
     "vite-plus": "^0.3.1",
     "vitest": "^4.1.11"
   },

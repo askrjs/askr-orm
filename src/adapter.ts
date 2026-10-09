@@ -20,6 +20,8 @@ export interface DatabaseAdapter {
     query: SqlQuery,
     options?: QueryOptions,
   ): Promise<ExecutionResult<Row>>;
+  /** Executes a migration's complete SQL script without interpreting result sets. */
+  executeScript?(sql: string, options?: QueryOptions): Promise<void>;
   stream?<Row = Record<string, unknown>>(
     query: SqlQuery,
     options?: QueryOptions,

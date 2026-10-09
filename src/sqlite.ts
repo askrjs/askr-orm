@@ -58,6 +58,7 @@ class SqliteAdapter implements DatabaseAdapter {
   private readonly queue: SqliteQueue;
   private savepoint = 0;
   private closed = false;
+  private databaseClosed = false;
 
   constructor(
     private readonly database: DatabaseSync,
@@ -74,11 +75,26 @@ class SqliteAdapter implements DatabaseAdapter {
     if (this.closed) throw new Error("SQLite database is closed.");
   }
 
+  private closeDatabase(): void {
+    if (this.databaseClosed) return;
+    this.database.close();
+    this.databaseClosed = true;
+    this.releaseQueue();
+  }
+
   private bestEffortExec(sql: string): void {
+    if (this.closed) return;
     try {
       this.database.exec(sql);
     } catch {
-      // Preserve the operation error that triggered transaction cleanup.
+      // Quarantine an unrolled-back connection while preserving the operation
+      // error. Closing rolls back its remaining writes and releases file locks.
+      this.closed = true;
+      try {
+        this.closeDatabase();
+      } catch {
+        // Preserve the operation error; explicit close can retry this cleanup.
+      }
     }
   }
 
@@ -101,6 +117,16 @@ class SqliteAdapter implements DatabaseAdapter {
       if (options.signal?.aborted) throw options.signal.reason;
       return this.perform<Row>(query);
     });
+  }
+
+  async executeScript(sql: string, options: QueryOptions = {}): Promise<void> {
+    const perform = () => {
+      this.assertOpen();
+      if (options.signal?.aborted) throw options.signal.reason;
+      this.database.exec(sqliteSql(sql));
+    };
+    if (context.getStore()?.adapter === this) perform();
+    else await this.queue.run(async () => perform());
   }
 
   async *stream<Row>(query: SqlQuery, options: QueryOptions = {}): AsyncIterable<Row> {
@@ -131,9 +157,11 @@ class SqliteAdapter implements DatabaseAdapter {
     }
     return this.queue.run(() =>
       context.run({ adapter: this, nestedQueue: new SqliteQueue() }, async () => {
+        this.assertOpen();
         this.database.exec("BEGIN");
         try {
           const result = await callback(this);
+          this.assertOpen();
           this.database.exec("COMMIT");
           return result;
         } catch (error) {
@@ -144,10 +172,14 @@ class SqliteAdapter implements DatabaseAdapter {
     );
   }
 
-  session<T>(callback: (adapter: DatabaseAdapter) => Promise<T>): Promise<T> {
+  async session<T>(callback: (adapter: DatabaseAdapter) => Promise<T>): Promise<T> {
+    this.assertOpen();
     if (context.getStore()?.adapter === this) return callback(this);
     return this.queue.run(() =>
-      context.run({ adapter: this, nestedQueue: new SqliteQueue() }, () => callback(this)),
+      context.run({ adapter: this, nestedQueue: new SqliteQueue() }, () => {
+        this.assertOpen();
+        return callback(this);
+      }),
     );
   }
 
@@ -156,6 +188,7 @@ class SqliteAdapter implements DatabaseAdapter {
   }
 
   private async nested<T>(callback: (adapter: DatabaseAdapter) => Promise<T>): Promise<T> {
+    this.assertOpen();
     const name = `askr_${++this.savepoint}`;
     this.database.exec(`SAVEPOINT ${name}`);
     try {
@@ -171,13 +204,8 @@ class SqliteAdapter implements DatabaseAdapter {
 
   async close(): Promise<void> {
     await this.queue.run(async () => {
-      if (this.closed) return;
       this.closed = true;
-      try {
-        this.database.close();
-      } finally {
-        this.releaseQueue();
-      }
+      this.closeDatabase();
     });
   }
 }

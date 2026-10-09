@@ -5,6 +5,9 @@ const state = vi.hoisted(() => ({
   ends: 0,
   releases: 0,
   failRollback: false,
+  failUnlock: false,
+  failDeallocate: false,
+  releaseErrors: [] as unknown[],
   clientErrorListeners: new Set<(error: Error) => void>(),
 }));
 
@@ -14,6 +17,10 @@ vi.mock("pg", () => {
       const statement = typeof config === "string" ? config : (config.text ?? "");
       state.statements.push(statement);
       if (state.failRollback && statement === "ROLLBACK") throw new Error("rollback failed");
+      if (state.failUnlock && statement.startsWith("SELECT pg_advisory_unlock"))
+        throw new Error("unlock failed");
+      if (state.failDeallocate && statement === "DEALLOCATE askr_describe")
+        throw new Error("deallocate failed");
       return { rows: [], rowCount: 0 };
     }
 
@@ -26,8 +33,9 @@ vi.mock("pg", () => {
         off: (event: string, listener: (error: Error) => void) => {
           if (event === "error") state.clientErrorListeners.delete(listener);
         },
-        release: () => {
+        release: (error?: unknown) => {
           state.releases += 1;
+          state.releaseErrors.push(error);
         },
       };
     }
@@ -54,6 +62,9 @@ describe("PostgreSQL adapter", () => {
     state.ends = 0;
     state.releases = 0;
     state.failRollback = false;
+    state.failUnlock = false;
+    state.failDeallocate = false;
+    state.releaseErrors.length = 0;
     state.clientErrorListeners.clear();
   });
 
@@ -95,6 +106,46 @@ describe("PostgreSQL adapter", () => {
     ).rejects.toMatchObject({ category: "connection", code: "57P01" });
     expect(state.clientErrorListeners).toHaveLength(0);
     expect(state.releases).toBe(1);
+    expect(state.releaseErrors[0]).toMatchObject({ category: "connection", code: "57P01" });
+    await adapter.close?.();
+  });
+
+  it("should discard a session after advisory unlock fails without replacing the callback error", async () => {
+    const adapter = await postgres({
+      url: "postgres://target",
+      shadowUrl: "postgres://shadow",
+    }).open();
+    const primary = new Error("migration failed");
+    state.failUnlock = true;
+    await expect(
+      adapter.migrationLock!(async () => {
+        throw primary;
+      }),
+    ).rejects.toBe(primary);
+    expect(state.releases).toBe(1);
+    expect(state.releaseErrors[0]).toMatchObject({ message: "unlock failed" });
+    expect(state.clientErrorListeners).toHaveLength(0);
+    await adapter.close?.();
+  });
+
+  it("should release and discard a client even if statement deallocation fails", async () => {
+    const shadow = await postgres({
+      url: "postgres://target",
+      shadowUrl: "postgres://shadow",
+    }).shadow();
+    state.failDeallocate = true;
+    await expect(shadow.describe("SELECT $1::text", ["value"])).rejects.toThrow(
+      "deallocate failed",
+    );
+    expect(state.releases).toBe(1);
+    expect(state.releaseErrors[0]).toMatchObject({ message: "deallocate failed" });
+    expect(state.clientErrorListeners).toHaveLength(0);
+    state.failDeallocate = false;
+    await expect(shadow.describe("SELECT $1::text", ["value"])).resolves.toMatchObject({
+      parameters: ["value"],
+    });
+    expect(state.releases).toBe(2);
+    await shadow.close?.();
   });
 
   it("should preserve the callback error when rollback fails", async () => {
@@ -112,5 +163,7 @@ describe("PostgreSQL adapter", () => {
     ).rejects.toBe(callbackError);
     expect(state.statements).toEqual(["BEGIN", "ROLLBACK"]);
     expect(state.releases).toBe(1);
+    expect(state.releaseErrors[0]).toMatchObject({ message: "rollback failed" });
+    await adapter.close?.();
   });
 });

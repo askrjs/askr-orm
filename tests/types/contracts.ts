@@ -1,5 +1,5 @@
 import {
-  createDatabaseClient,
+  defineDatabase,
   eq,
   table,
   text,
@@ -22,7 +22,16 @@ const users = table("users", {
 });
 
 declare const adapter: DatabaseAdapter;
-const db = createDatabaseClient({ users, groups }, adapter);
+const db = await defineDatabase({
+  tables: { users, groups },
+  driver: {
+    dialect: "postgres",
+    open: async () => adapter,
+    shadow: async () => {
+      throw new Error("No tooling in this fixture.");
+    },
+  },
+}).open();
 
 const row: InferRow<typeof users> = {
   id: "id",
