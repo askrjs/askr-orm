@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.5.0 - 2026-10-10
+
 ### Breaking
 
 - Curate the root to 68 names and the tooling subpath to its single runDatabaseCli
@@ -54,3 +56,8 @@
 
 - Complete coordinated 0.5.0 packed-candidate and website qualification remains
   pending. Maintainer review and approval are required before publication.
+
+### Development
+
+- First-party development workflows use Vite+; specialized compiler, runtime,
+  browser, and package checks remain part of validation.

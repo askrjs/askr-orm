@@ -1,5 +1,5 @@
 import { compileKeyedSql, keyedSql } from "./sql";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import { and, columnRef, compileSql, eq, escapeLikePattern, inArray, like, sql } from "./index";
 import { rewritePlaceholders, sqlStructure } from "./placeholders";
 

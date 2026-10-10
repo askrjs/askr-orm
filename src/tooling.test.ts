@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vite-plus/test";
 import { diffSnapshots, runDatabaseCli, type SchemaSnapshot } from "./tooling-impl";
 
 const temporaryDirectories: string[] = [];
