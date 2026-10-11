@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { defineDatabase, defineQuery, escapeLikePattern, like, table, text } from "./index";
 import { jsonb } from "./postgres";
 import { sqlite } from "./sqlite";
