@@ -23,6 +23,16 @@ The runtime and tooling adapters are deliberately separate.
 An adapter must pass values to the driver separately from SQL text and never
 interpolate application data. Placeholder rendering is dialect-owned.
 
+Registered queries return adapter values without decoding or coercion. Generated
+SQLite row fields use `number | string | Uint8Array | null`: SQLite column
+declarations specify affinity rather than enforce a storage class, so even
+`numeric`, `bigint`, and `boolean` columns may contain numbers, text, blobs, or
+null. The built-in `node:sqlite` adapter uses number reads for integers; it does
+not return JavaScript booleans, bigints, or dates. Integers outside the safe
+JavaScript number range raise a driver error. Narrow or validate generated fields
+before using a specific value type. Generated PostgreSQL fields follow the
+standard `pg` parsers described in [PostgreSQL tooling](postgres-tooling.md).
+
 `DatabaseToolingAdapter` is allowed only in tooling:
 
 - `identity` is a stable, non-secret database identity.

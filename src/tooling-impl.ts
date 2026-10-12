@@ -700,6 +700,12 @@ async function describeRegisteredQueries(
 }
 
 function tsType(dataType: string, nullable: boolean, dialect: "postgres" | "sqlite"): string {
+  // SQLite declarations describe affinity, not enforced storage classes. Registered
+  // queries return node:sqlite values unchanged, with bigint reads disabled.
+  if (dialect === "sqlite") {
+    const base = "number | string | Uint8Array";
+    return nullable ? `${base} | null` : base;
+  }
   const normalized = dataType.toLowerCase();
   const base =
     normalized === "boolean"
@@ -710,8 +716,7 @@ function tsType(dataType: string, nullable: boolean, dialect: "postgres" | "sqli
           ? "string"
           : normalized === "bytea"
             ? "Uint8Array"
-            : dialect === "postgres" &&
-                /^(?:date|timestamp(?:\(\d+\))? (?:with|without) time zone)$/.test(normalized)
+            : /^(?:date|timestamp(?:\(\d+\))? (?:with|without) time zone)$/.test(normalized)
               ? "Date"
               : /^(?:json|jsonb)$/.test(normalized)
                 ? "unknown"
