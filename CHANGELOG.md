@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.5.0 - 2026-10-12
+
 ### Breaking
 
 - Curate the root to 68 names and the tooling subpath to its single runDatabaseCli
