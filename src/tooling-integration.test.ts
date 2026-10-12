@@ -259,7 +259,7 @@ const entries = table("entries", {
   lowerEmail: text().generatedAlwaysAs("lower(email)"), amount: numeric(10, 2).default("0.00"), data: bytes(),
 }, { schema: "catalog #%", constraints: [check("length(email) > 0", "email_nonempty"), index(["lower(email)"], { name: "lower_email", where: "state IS NOT NULL" })] });
 const emails = view("emails", 'SELECT email FROM "catalog #%".entries', { schema: "catalog #%" });
-const values = defineQuery<Record<never, never>>("values")\`SELECT 9007199254740993::bigint AS count, DATE '2026-10-09' AS day, ARRAY[1,2] AS numbers\`;
+const values = defineQuery<Record<never, never>>("values")\`SELECT 9007199254740993::bigint AS count, 1.25::numeric AS amount, true AS flag, DATE '2026-10-09' AS day, ARRAY[1,2] AS numbers\`;
 export default defineDatabase({ driver: postgres({ url: ${JSON.stringify(targetUrl)}, shadowUrl: ${JSON.stringify(shadowUrl)}, pool: { max: 1 } }), tables: { entries }, enums: [status], views: [emails], queries: { values } });
 `,
       );
@@ -270,16 +270,20 @@ export default defineDatabase({ driver: postgres({ url: ${JSON.stringify(targetU
       expect(await fs.readdir(path.join(directory, "migrations"))).toHaveLength(1);
       const artifact = await fs.readFile(path.join(directory, "generated.ts"), "utf8");
       expect(artifact).toContain('readonly "count": string | null;');
+      expect(artifact).toContain('readonly "amount": string | null;');
+      expect(artifact).toContain('readonly "flag": boolean | null;');
       expect(artifact).toContain('readonly "day": Date | null;');
       expect(artifact).toContain('readonly "numbers": unknown | null;');
       const observer = new Pool({ connectionString: shadowUrl });
       try {
         const [row] = (
           await observer.query(
-            "SELECT 9007199254740993::bigint AS count, DATE '2026-10-09' AS day, ARRAY[1,2] AS numbers",
+            "SELECT 9007199254740993::bigint AS count, 1.25::numeric AS amount, true AS flag, DATE '2026-10-09' AS day, ARRAY[1,2] AS numbers",
           )
         ).rows;
         expect(row.count).toBe("9007199254740993");
+        expect(row.amount).toBe("1.25");
+        expect(row.flag).toBe(true);
         expect(row.day).toBeInstanceOf(Date);
         expect(row.numbers).toEqual([1, 2]);
       } finally {

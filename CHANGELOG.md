@@ -20,6 +20,9 @@
 
 ### Fixed
 
+- Generate SQLite registered-query fields as native number/string/blob/null
+  unions instead of PostgreSQL numeric strings and booleans. SQLite affinities
+  permit mixed storage classes; callers must narrow generated fields before use.
 - SQLite migration execution no longer drops all statements after the first.
 - PostgreSQL migration scripts no longer fail when the driver returns multiple
   result sets.
