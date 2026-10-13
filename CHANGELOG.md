@@ -55,7 +55,9 @@
 - Gate real and normally installed generation/validation/no-op workflows against
   isolated PostgreSQL 16, 17 and 18 scratch databases.
 
-### Remaining release gate
+### Candidate verification
 
-- Complete coordinated 0.5.0 packed-candidate and website qualification remains
-  pending. Maintainer review and approval are required before publication.
+- The exact promotion candidate on PR #58 passes the Linux, macOS and Windows
+  package gates, PostgreSQL 16–18 integration and installed-generation checks,
+  and CodeQL. Tag creation and npm publication run through the main-branch
+  package workflow.
