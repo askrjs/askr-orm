@@ -1,4 +1,4 @@
-import { toSnakeCase } from "./naming";
+import { quoteIdentifier, toSnakeCase } from "./naming";
 
 /** Bidirectional converter between a column's stored (database) and application-facing value. */
 export interface Codec<Database, Application> {
@@ -323,7 +323,7 @@ export function postgresEnum<const V extends readonly [string, ...string[]]>(
     name,
     schema,
     values,
-    column: () => column<V[number]>(`${schema}.${name}`),
+    column: () => column<V[number]>(`${quoteIdentifier(schema)}.${quoteIdentifier(name)}`),
   };
 }
 

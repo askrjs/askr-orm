@@ -1,0 +1,63 @@
+# Changelog
+
+## Unreleased
+
+## 0.5.0 - 2026-10-12
+
+### Breaking
+
+- Curate the root to 68 names and the tooling subpath to its single runDatabaseCli
+  bridge. Remove 54 named exports and sql.key. Replace direct client construction
+  with defineDatabase/open; use sql.identifier/literal/unsafe and defineQuery for
+  their canonical contracts. Every removed name has migration guidance in
+  docs/0.5.0-api.md. Retain all five export-map keys and optional PostgreSQL peers.
+
+### Added
+
+- Optional DatabaseAdapter.executeScript for complete migration scripts; custom
+  drivers without it keep the existing execute fallback. PostgreSQL and SQLite
+  implementations execute driver-owned scripts without splitting semicolons.
+- Exact packed runtime/declaration checks, removed-import and private-path checks,
+  optional-peer isolation/minimum installs, and real-adapter value parity probes.
+
+### Fixed
+
+- Generate SQLite registered-query fields as native number/string/blob/null
+  unions instead of PostgreSQL numeric strings and booleans. SQLite affinities
+  permit mixed storage classes; callers must narrow generated fields before use.
+- SQLite migration execution no longer drops all statements after the first.
+- PostgreSQL migration scripts no longer fail when the driver returns multiple
+  result sets.
+- Failed SQLite rollback closes and quarantines the adapter, rolls back remaining
+  writes and releases shared-file ownership before a new connection recovers.
+- PostgreSQL failed rollback/advisory unlock discards poisoned pooled connections
+  while preserving the primary operation error; failed statement deallocation
+  still releases and discards the owned client.
+- Update compatible development tooling to audited versions and add TypeScript 6 compiler-API audits alongside the TypeScript 7 gate and pin
+  the matching coverage provider.
+
+- Load CLI database entries through file URLs so Windows drive paths and reserved
+  URL characters in project directories remain filesystem paths.
+
+- Transaction-owned migration plan/apply/resolve handles now reject use after
+  their transaction ends, before any SQL can run on a released connection.
+
+- Complete PostgreSQL scratch reset with an actual database separation check,
+  session-owned workflow lock, normalized catalog introspection and protocol-only
+  query description. Unequal URL strings alone no longer authorize reset.
+- Normalize the desired PostgreSQL schema inside rollback-only scratch DDL,
+  preserving native type/default/expression semantics without comparing codecs
+  or application property names to database columns.
+- Quote enum type/schema names, emit one composite primary key, and defer initial
+  foreign keys until their referenced tables exist.
+- Generate conservative nullable query results and standard PostgreSQL parser
+  types (int8/numeric strings, timestamp/date Date, unknown unsupported types).
+- Gate real and normally installed generation/validation/no-op workflows against
+  isolated PostgreSQL 16, 17 and 18 scratch databases.
+
+### Candidate verification
+
+- The exact promotion candidate on PR #58 passes the Linux, macOS and Windows
+  package gates, PostgreSQL 16–18 integration and installed-generation checks,
+  and CodeQL. Tag creation and npm publication run through the main-branch
+  package workflow.

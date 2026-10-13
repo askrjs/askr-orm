@@ -25,7 +25,7 @@ type SqlChunk =
   | { readonly kind: "identifier"; readonly value: string }
   | { readonly kind: "fragment"; readonly value: SqlFragment };
 
-/** A named SQL template with `:named` parameters, built with `sql.key(...)`. See {@link compileKeyedSql}. */
+/** A named SQL template with `:named` parameters, built by the private keyedSql helper. See {@link compileKeyedSql}. */
 export interface KeyedSql<TParameters extends Record<string, unknown>, TResult> {
   readonly kind: "keyed-sql";
   readonly key: string;
@@ -105,13 +105,9 @@ interface SqlTag {
   readonly identifier: (name: string) => SqlFragment;
   readonly literal: (value: string | number | boolean | null) => SqlFragment;
   readonly unsafe: (text: string) => UnsafeSql;
-  readonly key: <TParameters extends Record<string, unknown>, TResult = unknown>(
-    keyValue: string,
-    parameters: TParameters,
-  ) => (strings: TemplateStringsArray) => KeyedSql<TParameters, TResult>;
 }
 
-function keyedSql<TParameters extends Record<string, unknown>, TResult = unknown>(
+export function keyedSql<TParameters extends Record<string, unknown>, TResult = unknown>(
   keyValue: string,
   parameters: TParameters,
 ): (strings: TemplateStringsArray) => KeyedSql<TParameters, TResult> {
@@ -135,14 +131,13 @@ function keyedSql<TParameters extends Record<string, unknown>, TResult = unknown
 
 /**
  * Tagged template for building a {@link SqlFragment}: interpolated fragments splice in, other
- * values become bound parameters. Also exposes `sql.identifier`, `sql.literal`, `sql.unsafe`,
- * and `sql.key` for keyed/named-parameter queries.
+ * values become bound parameters. Exposes `sql.identifier`, `sql.literal` and `sql.unsafe`
+ * for identifiers, explicit literals, and the unsafe SQL boundary.
  */
 export const sql: SqlTag = Object.assign(sqlTag, {
   identifier,
   literal,
   unsafe: unsafeSql,
-  key: keyedSql,
 });
 
 /** Compiles a {@link SqlFragment} tree into parameterized SQL text and an ordered values array. */

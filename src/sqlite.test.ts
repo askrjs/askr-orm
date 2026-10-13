@@ -1,17 +1,10 @@
+import { createDatabaseClient } from "./client";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import {
-  createDatabaseClient,
-  defineDatabase,
-  defineQuery,
-  escapeLikePattern,
-  like,
-  table,
-  text,
-} from "./index";
+import { defineDatabase, defineQuery, escapeLikePattern, like, table, text } from "./index";
 import { jsonb } from "./postgres";
 import { sqlite } from "./sqlite";
 import { createMigrationsApi } from "./migrations";
@@ -42,12 +35,13 @@ describe("SQLite dialect", () => {
     const adapter = await sqlite({ filename: ":memory:" }).open();
     const callbackError = new Error("callback failed");
     const originalExec = DatabaseSync.prototype.exec;
-    const exec = vi
-      .spyOn(DatabaseSync.prototype, "exec")
-      .mockImplementation(function (this: DatabaseSync, sql) {
-        if (sql === "ROLLBACK") throw new Error("rollback failed");
-        return originalExec.call(this, sql);
-      });
+    const exec = vi.spyOn(DatabaseSync.prototype, "exec").mockImplementation(function (
+      this: DatabaseSync,
+      sql,
+    ) {
+      if (sql === "ROLLBACK") throw new Error("rollback failed");
+      return originalExec.call(this, sql);
+    });
 
     try {
       await expect(

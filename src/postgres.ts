@@ -1,4 +1,4 @@
-import type { Pool as PoolType, PoolClient, PoolConfig, QueryResult } from "pg";
+import type { Pool as PoolType, PoolConfig, QueryResult } from "pg";
 import type {
   DatabaseAdapter,
   DatabaseDriver,
@@ -6,9 +6,9 @@ import type {
   QueryOptions,
   TransactionOptions,
 } from "./adapter";
-import type { DatabaseToolingAdapter } from "./definition";
 import type { SqlQuery } from "./sql";
-import { normalizeDatabaseError, type DatabaseError } from "./errors";
+import { CheckedOutClient } from "./postgres-client";
+import { createPostgresTooling } from "./postgres-tooling";
 export { jsonb, postgresEnum, postgresType, timestampTz, bytea } from "./schema";
 
 const MIGRATION_LOCK_KEY = "4707438161740729";
@@ -24,43 +24,6 @@ function lazy(value: string | (() => string) | undefined, environment: string): 
   const result = typeof value === "function" ? value() : (value ?? process.env[environment]);
   if (!result) throw new Error(`PostgreSQL requires ${environment} or an explicit lazy URL.`);
   return result;
-}
-
-class CheckedOutClient {
-  private failure: DatabaseError | undefined;
-
-  private readonly onError = (error: Error): void => {
-    this.failure ??= normalizeDatabaseError(error);
-  };
-
-  constructor(private readonly client: PoolClient) {
-    client.on("error", this.onError);
-  }
-
-  assertHealthy(): void {
-    if (this.failure) throw this.failure;
-  }
-
-  async query(config: unknown): Promise<QueryResult> {
-    this.assertHealthy();
-    try {
-      const result = await this.client.query(config as never);
-      this.assertHealthy();
-      return result;
-    } catch (error) {
-      throw normalizeDatabaseError(error);
-    }
-  }
-
-  startStream<T>(query: T): T {
-    this.assertHealthy();
-    return this.client.query(query as never) as T;
-  }
-
-  release(): void {
-    this.client.off("error", this.onError);
-    this.client.release(this.failure);
-  }
 }
 
 class PgAdapter implements DatabaseAdapter {
@@ -86,6 +49,15 @@ class PgAdapter implements DatabaseAdapter {
       ...(options.timeoutMs ? { query_timeout: options.timeoutMs } : {}),
     });
     return { rows: result.rows as Row[], rowCount: result.rowCount ?? result.rows.length };
+  }
+
+  async executeScript(sql: string, options: QueryOptions = {}): Promise<void> {
+    if (options.signal?.aborted) throw options.signal.reason;
+    await this.executor.query({
+      text: sql,
+      ...(options.signal ? { signal: options.signal } : {}),
+      ...(options.timeoutMs ? { query_timeout: options.timeoutMs } : {}),
+    });
   }
 
   async *stream<Row>(query: SqlQuery, options: QueryOptions = {}): AsyncIterable<Row> {
@@ -134,8 +106,8 @@ class PgAdapter implements DatabaseAdapter {
         await this.client.query(`RELEASE SAVEPOINT ${savepoint}`);
         return value;
       } catch (error) {
-        await this.client.query(`ROLLBACK TO SAVEPOINT ${savepoint}`).catch(() => undefined);
-        await this.client.query(`RELEASE SAVEPOINT ${savepoint}`).catch(() => undefined);
+        await this.client.cleanup(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+        await this.client.cleanup(`RELEASE SAVEPOINT ${savepoint}`);
         throw error;
       }
     }
@@ -154,14 +126,14 @@ class PgAdapter implements DatabaseAdapter {
       await client.query("COMMIT");
       return value;
     } catch (error) {
-      await client.query("ROLLBACK").catch(() => undefined);
+      await client.cleanup("ROLLBACK");
       throw error;
     } finally {
       owned?.release();
     }
   }
 
-  async session<T>(callback: (adapter: DatabaseAdapter) => Promise<T>): Promise<T> {
+  async session<T>(callback: (adapter: PgAdapter) => Promise<T>): Promise<T> {
     if (this.client) return callback(this);
     if (!this.pool) throw new Error("PostgreSQL sessions require a pool.");
     const client = new CheckedOutClient(await this.pool.connect());
@@ -180,9 +152,7 @@ class PgAdapter implements DatabaseAdapter {
       try {
         return await callback(session);
       } finally {
-        await session
-          .execute({ text: `SELECT pg_advisory_unlock(${MIGRATION_LOCK_KEY})`, values: [] })
-          .catch(() => undefined);
+        await session.client!.cleanup(`SELECT pg_advisory_unlock(${MIGRATION_LOCK_KEY})`);
       }
     });
   }
@@ -216,41 +186,6 @@ async function createPool(
   return new module.Pool({ ...options, connectionString: url });
 }
 
-async function pgTooling(
-  url: string,
-  options?: Omit<PoolConfig, "connectionString">,
-): Promise<DatabaseToolingAdapter> {
-  const pool = await createPool(url, options);
-  return {
-    identity: url,
-    async reset() {
-      throw new Error("PostgreSQL shadow reset must be performed by migration tooling.");
-    },
-    async execute(sql) {
-      await pool.query(sql);
-    },
-    async introspect() {
-      return (await pool.query("SELECT current_database() AS database, current_schema() AS schema"))
-        .rows;
-    },
-    async describe(sql, parameterNames) {
-      const client = new CheckedOutClient(await pool.connect());
-      let prepared = false;
-      try {
-        await client.query(`PREPARE askr_describe AS ${sql}`);
-        prepared = true;
-        return { parameters: [...parameterNames], columns: [] };
-      } finally {
-        if (prepared) await client.query("DEALLOCATE askr_describe");
-        client.release();
-      }
-    },
-    async close() {
-      await pool.end();
-    },
-  };
-}
-
 /**
  * Creates a PostgreSQL {@link DatabaseDriver} backed by `pg`, connecting to `options.url`
  * (defaulting to `DATABASE_URL`). Requires the optional peers `pg` and `pg-query-stream`; the
@@ -276,7 +211,11 @@ export function postgres(options: PostgresOptions = {}): DatabaseDriver {
       const shadow = lazy(options.shadowUrl, "DATABASE_SHADOW_URL");
       if (target === shadow)
         throw new Error("PostgreSQL target and shadow database identities must differ.");
-      return pgTooling(shadow, options.pool);
+      return createPostgresTooling(
+        shadow,
+        () => createPool(shadow, options.pool),
+        () => createPool(target, options.pool),
+      );
     },
   };
 }

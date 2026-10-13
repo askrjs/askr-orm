@@ -1,5 +1,5 @@
 import { performance } from "node:perf_hooks";
-import { createDatabaseClient, eq, table, text, uuid } from "../dist/index.js";
+import { defineDatabase, eq, table, text, uuid } from "../dist/index.js";
 
 const gate = process.argv.includes("--gate");
 const iterations = 20_000;
@@ -23,7 +23,16 @@ const users = table("users", {
   email: text().notNull(),
 });
 const adapter = new BenchmarkAdapter();
-const db = createDatabaseClient({ users }, adapter);
+const db = await defineDatabase({
+  tables: { users },
+  driver: {
+    dialect: "postgres",
+    open: async () => adapter,
+    shadow: async () => {
+      throw new Error("Benchmark does not use tooling.");
+    },
+  },
+}).open();
 
 async function measure(callback) {
   const started = performance.now();

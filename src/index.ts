@@ -9,49 +9,21 @@ export type {
   TelemetryOptions,
   TransactionOptions,
 } from "./adapter";
-export {
-  createDatabaseClient,
-  TableClient,
-  type DatabaseClient,
-  type ReturningRows,
-  type ReturningRow,
-  type ReturningStatus,
-  type WriteResult,
-} from "./client";
+export type { DatabaseClient, WriteResult } from "./client";
 export {
   defineDatabase,
   type DatabaseDefinition,
   type DatabaseToolingAdapter,
-  type CleanDatabaseOptions,
   type GeneratedDatabaseArtifact,
 } from "./definition";
-export {
-  defineQuery,
-  type RegisteredQuery,
-  type RegisteredQueryFunction,
-} from "./registered-query";
-export { DatabaseError, normalizeDatabaseError, type DatabaseErrorCategory } from "./errors";
-export {
-  type AppliedMigration,
-  type BundledMigration,
-  type MigrationApplyOptions,
-  type MigrationApplyResult,
-  type MigrationEvent,
-  type MigrationManifest,
-  type MigrationPlan,
-  type MigrationPlanEntry,
-  type MigrationsApi,
+export { defineQuery, type RegisteredQuery } from "./registered-query";
+export { DatabaseError, type DatabaseErrorCategory } from "./errors";
+export type {
+  MigrationApplyOptions,
+  MigrationEvent,
+  MigrationManifest,
+  MigrationsApi,
 } from "./migrations";
-export { assertSafeIdentifier, quoteIdentifier, toSnakeCase } from "./naming";
-export {
-  type JoinTarget,
-  type JoinedQuery,
-  type PreparedQuery,
-  type References,
-  type SelectQuery,
-  type Selection,
-  type SelectionResult,
-} from "./query";
 export {
   bigInt,
   boolean,
@@ -70,56 +42,34 @@ export {
   unique,
   uuid,
   view,
-  type AnyColumn,
   type AnyTable,
-  type CheckConstraint,
   type Codec,
-  type ColumnAst,
   type ColumnBuilder,
-  type ColumnValue,
-  type EnumDefinition,
-  type IndexDefinition,
   type InferInsert,
   type InferKey,
   type InferPatch,
   type InferRow,
-  type TableConstraint,
-  type TableDefinition,
-  type TableOptions,
-  type UniqueConstraint,
-  type ViewDefinition,
 } from "./schema";
 export {
   and,
   columnRef,
-  compileKeyedSql,
   compileSql,
   eq,
   escapeLikePattern,
-  executeKeyedSql,
   gt,
   gte,
-  identifier,
   ilike,
   inArray,
   isNotNull,
   isNull,
-  joinFragments,
   like,
-  literal,
   lt,
   lte,
   ne,
   not,
   or,
   sql,
-  tableRefs,
-  unsafeSql,
-  type ColumnRef,
   type Expression,
-  type KeyedSql,
   type SqlFragment,
   type SqlQuery,
-  type TableRefs,
-  type UnsafeSql,
 } from "./sql";

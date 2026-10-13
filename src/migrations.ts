@@ -169,7 +169,7 @@ async function applyOne(
   if (migration.transactional) {
     await adapter.transaction(
       async (transaction) => {
-        await transaction.execute({ text: migration.sql, values: [] }, options);
+        await executeScript(transaction, migration.sql, options);
         await recordState(transaction, migration, "applied", performance.now() - started, options);
       },
       options.signal === undefined ? {} : { signal: options.signal },
@@ -177,7 +177,7 @@ async function applyOne(
   } else {
     await recordState(adapter, migration, "applying", null, options);
     try {
-      await adapter.execute({ text: migration.sql, values: [] }, options);
+      await executeScript(adapter, migration.sql, options);
       await recordState(adapter, migration, "applied", performance.now() - started, options);
     } catch (error) {
       await recordState(adapter, migration, "failed", performance.now() - started, options).catch(
@@ -189,6 +189,15 @@ async function applyOne(
   const durationMs = performance.now() - started;
   options.onEvent?.({ type: "applied", migration: migration.id, durationMs });
   return durationMs;
+}
+
+async function executeScript(
+  adapter: DatabaseAdapter,
+  sql: string,
+  options: QueryOptions,
+): Promise<void> {
+  if (adapter.executeScript) await adapter.executeScript(sql, options);
+  else await adapter.execute({ text: sql, values: [] }, options);
 }
 
 export function createMigrationsApi(

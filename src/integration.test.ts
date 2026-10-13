@@ -1,3 +1,5 @@
+import { assertValueConformance } from "./value-conformance.fixture";
+import { createDatabaseClient } from "./client";
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import path from "node:path";
@@ -5,7 +7,7 @@ import { promisify } from "node:util";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { DatabaseAdapter } from "./adapter";
-import { createDatabaseClient, eq, table, text, uuid, type DatabaseClient } from "./index";
+import { eq, table, text, uuid, type DatabaseClient } from "./index";
 import { postgres, timestampTz } from "./postgres";
 import { createMigrationsApi, type MigrationManifest } from "./migrations";
 
@@ -243,5 +245,115 @@ integration("PostgreSQL adapter conformance", () => {
     await expect(migrations.plan()).rejects.toThrow(/migration resolve/);
     await expect(migrations.resolve("01FAILED", "rolled-back")).resolves.toBeUndefined();
     expect((await migrations.plan()).pending.map(({ id }) => id)).toEqual(["01FAILED"]);
+  });
+
+  it("should preserve a callback failure through connection loss during rollback and obtain a fresh connection", async () => {
+    const id = randomUUID();
+    const primary = new Error("rollback after disconnect");
+    let killed = 0;
+    await expect(
+      adapter.transaction(async (transaction) => {
+        await transaction.execute({
+          text: 'INSERT INTO "orm_groups" ("id", "name") VALUES ($1, $2)',
+          values: [id, "must roll back"],
+        });
+        killed = (
+          await transaction.execute<{ pid: number }>({
+            text: "SELECT pg_backend_pid() AS pid",
+            values: [],
+          })
+        ).rows[0]!.pid;
+        expect(
+          (await pool.query("SELECT pg_terminate_backend($1) AS terminated", [killed])).rows[0]
+            .terminated,
+        ).toBe(true);
+        throw primary;
+      }),
+    ).rejects.toBe(primary);
+    expect(
+      (await adapter.execute({ text: 'SELECT * FROM "orm_groups" WHERE "id" = $1', values: [id] }))
+        .rows,
+    ).toEqual([]);
+    const fresh = await adapter.execute<{ pid: number }>({
+      text: "SELECT pg_backend_pid() AS pid",
+      values: [],
+    });
+    expect(fresh.rows[0]!.pid).not.toBe(killed);
+  });
+
+  it("should apply every statement of a PostgreSQL migration script atomically", async () => {
+    await pool.query('DROP TABLE IF EXISTS "_askr_migrations", "orm_migration_script"');
+    const manifest: MigrationManifest = {
+      migrations: [
+        {
+          id: "01PGSCRIPT",
+          parent: null,
+          checksum: "pgscript",
+          transactional: true,
+          sql: 'CREATE TABLE "orm_migration_script" ("id" integer PRIMARY KEY); INSERT INTO "orm_migration_script" VALUES (1); INSERT INTO "orm_migration_script" VALUES (2);',
+        },
+      ],
+    };
+    try {
+      const migrations = createMigrationsApi(adapter, manifest);
+      await expect(migrations.apply()).resolves.toEqual({ applied: ["01PGSCRIPT"] });
+      expect(
+        (
+          await adapter.execute({
+            text: 'SELECT * FROM "orm_migration_script" ORDER BY id',
+            values: [],
+          })
+        ).rows,
+      ).toEqual([{ id: 1 }, { id: 2 }]);
+      expect((await migrations.plan()).pending).toHaveLength(0);
+    } finally {
+      await pool.query('DROP TABLE IF EXISTS "_askr_migrations", "orm_migration_script"');
+    }
+  });
+
+  it("should release the migration lock and leave no application DDL or ledger entry after self-disconnect", async () => {
+    await pool.query('DROP TABLE IF EXISTS "_askr_migrations", "orm_migration_disconnect"');
+    const manifest: MigrationManifest = {
+      migrations: [
+        {
+          id: "01DISCONNECT",
+          parent: null,
+          checksum: "disconnect",
+          transactional: true,
+          sql: 'CREATE TABLE "orm_migration_disconnect" ("id" integer PRIMARY KEY); INSERT INTO "orm_migration_disconnect" VALUES (1); SELECT pg_terminate_backend(pg_backend_pid());',
+        },
+      ],
+    };
+    try {
+      const migrations = createMigrationsApi(adapter, manifest);
+      await expect(migrations.apply()).rejects.toMatchObject({
+        category: "connection",
+        code: "57P01",
+      });
+      expect(
+        (await pool.query("SELECT to_regclass('public.orm_migration_disconnect') AS name")).rows,
+      ).toEqual([{ name: null }]);
+      expect(
+        (await adapter.execute({ text: 'SELECT * FROM "_askr_migrations"', values: [] })).rows,
+      ).toEqual([]);
+      expect((await migrations.plan()).pending).toHaveLength(1);
+      const corrected = {
+        migrations: [
+          {
+            ...manifest.migrations[0]!,
+            sql: 'CREATE TABLE "orm_migration_disconnect" ("id" integer PRIMARY KEY)',
+          },
+        ],
+      };
+      await expect(createMigrationsApi(adapter, corrected).apply()).resolves.toEqual({
+        applied: ["01DISCONNECT"],
+      });
+      expect((await createMigrationsApi(adapter, corrected).plan()).pending).toHaveLength(0);
+    } finally {
+      await pool.query('DROP TABLE IF EXISTS "_askr_migrations", "orm_migration_disconnect"');
+    }
+  });
+  it("should preserve null, empty, binary and large values through PostgreSQL binding and recover from constraints", async () => {
+    await assertValueConformance(adapter, "postgres");
   });
 });
