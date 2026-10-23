@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { Pool } from "pg";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import { postgres } from "./postgres";
 import { runDatabaseCli, type SchemaSnapshot } from "./tooling-impl";
 
