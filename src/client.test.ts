@@ -1,5 +1,5 @@
 import { createDatabaseClient } from "./client";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import type { DatabaseAdapter, ExecutionResult, QueryOptions, TransactionOptions } from "./adapter";
 import { columnRef, eq, table, text, uuid } from "./index";
 import type { SqlQuery } from "./sql";

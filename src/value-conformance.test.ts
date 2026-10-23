@@ -1,4 +1,4 @@
-import { it } from "vitest";
+import { it } from "vite-plus/test";
 import { sqlite } from "./sqlite";
 import { assertValueConformance } from "./value-conformance.fixture";
 
