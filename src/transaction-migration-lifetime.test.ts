@@ -1,4 +1,4 @@
-import { expect, it, vi } from "vitest";
+import { expect, it, vi } from "vite-plus/test";
 import { defineDatabase, type MigrationsApi } from "./index";
 import { sqlite } from "./sqlite";
 

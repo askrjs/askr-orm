@@ -5,7 +5,7 @@ import { execFile } from "node:child_process";
 import path from "node:path";
 import { promisify } from "node:util";
 import { Pool } from "pg";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import type { DatabaseAdapter } from "./adapter";
 import { eq, table, text, uuid, type DatabaseClient } from "./index";
 import { postgres, timestampTz } from "./postgres";

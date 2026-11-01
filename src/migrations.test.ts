@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import type { DatabaseAdapter, ExecutionResult, QueryOptions, TransactionOptions } from "./adapter";
 import { createMigrationsApi, type AppliedMigration, type MigrationManifest } from "./migrations";
 import type { SqlQuery } from "./sql";

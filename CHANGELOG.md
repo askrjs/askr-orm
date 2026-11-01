@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.5.1 - 2026-11-01
+
+### Changed
+
+- Refresh the `tsx` runtime dependency to 4.23.15. No public API changes.
+
+### Development
+
+- Move first-party build and test tooling to Vite+ 1.4 and Vitest 5, and update
+  TypeScript 6 compatibility, Node types, PostgreSQL adapter test dependencies,
+  and package linting tools.
+
 ## 0.5.0 - 2026-10-12
 
 ### Breaking
