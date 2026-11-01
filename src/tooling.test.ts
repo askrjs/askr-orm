@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import ts from "@typescript/typescript6";
+import ts from "typescript";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 import {
   bigInt,
