@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import ts from "@typescript/typescript6";
+import ts from "typescript";
 
 const root = process.cwd();
 const contract = JSON.parse(await fs.readFile("tests/public-contract.json", "utf8"));
@@ -175,7 +175,7 @@ void [generated, codec, postgresOptions, invalidPool, sqliteOptions];\n`,
   );
   execFileSync(
     process.execPath,
-    [path.join(root, "node_modules/typescript/bin/tsc"), "--project", "tsconfig.json"],
+    [path.join(root, "node_modules/@typescript/native/bin/tsc"), "--project", "tsconfig.json"],
     { cwd: consumer, stdio: "pipe", encoding: "utf8" },
   );
   const options = {
