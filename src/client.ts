@@ -40,6 +40,34 @@ function batchProperties(inputs: readonly Record<string, unknown>[]): string[] {
   return [...new Set(inputs.flatMap((input) => Object.keys(input)))];
 }
 
+async function writeChunk<Row extends object>(
+  adapter: DatabaseAdapter,
+  chunk: readonly Row[],
+  properties: string[],
+  write: (connection: DatabaseAdapter, rows: readonly Row[], columns: string[]) => Promise<void>,
+): Promise<void> {
+  if (adapter.dialect !== "sqlite") return write(adapter, chunk, properties);
+  const groups: { rows: Row[]; columns: string[] }[] = [];
+  for (const row of chunk) {
+    const columns = properties.filter((key) => Object.hasOwn(row, key));
+    const last = groups.at(-1);
+    if (
+      last &&
+      columns.length === last.columns.length &&
+      columns.every((key, i) => key === last.columns[i])
+    ) {
+      last.rows.push(row);
+    } else {
+      groups.push({ rows: [row], columns });
+    }
+  }
+  const run = async (connection: DatabaseAdapter) => {
+    for (const group of groups) await write(connection, group.rows, group.columns);
+  };
+  if (groups.length > 1) await adapter.transaction(run);
+  else await run(adapter);
+}
+
 function effectiveBatchChunkSize(
   configuredChunkSize: number,
   propertyCount: number,
@@ -292,61 +320,7 @@ export class TableClient<T extends AnyTable> {
     options: (ReturningStatus | ReturningRows) &
       QueryOptions & { readonly chunkSize?: number } = {},
   ): Promise<WriteResult | readonly InferRow<T>[]> {
-    if (
-      options.returning !== undefined &&
-      options.returning !== "status" &&
-      options.returning !== "rows"
-    ) {
-      throw new Error('insertMany returning must be "status" or "rows".');
-    }
-    if (inputs.length === 0) return options.returning === "rows" ? [] : { rowsAffected: 0 };
-    const chunkSize = options.chunkSize ?? 1000;
-    if (!Number.isSafeInteger(chunkSize) || chunkSize < 1) throw new Error("Invalid chunkSize.");
-    const allProperties = batchProperties(inputs as readonly Record<string, unknown>[]);
-    const effectiveChunkSize = effectiveBatchChunkSize(
-      chunkSize,
-      allProperties.length,
-      "insertMany",
-    );
-    let rowsAffected = 0;
-    const rows: InferRow<T>[] = [];
-    for (let index = 0; index < inputs.length; index += effectiveChunkSize) {
-      const chunk = inputs.slice(index, index + effectiveChunkSize);
-      const columns = allProperties.map((property) => {
-        const column = this.definition.$columns[property];
-        if (!column) throw new Error(`Unknown ${this.definition.$name} property ${property}.`);
-        return column;
-      });
-      const values: unknown[] = [];
-      const tuples = chunk.map((input) => {
-        const record = input as Record<string, unknown>;
-        return `(${allProperties
-          .map((property) => {
-            if (!(property in record)) return "DEFAULT";
-            values.push(encode(this.definition.$columns[property]!, record[property]));
-            return `$${values.length}`;
-          })
-          .join(", ")})`;
-      });
-      const returning = options.returning === "rows";
-      const result = await execute(
-        this.adapter,
-        {
-          text: `INSERT INTO ${qualifiedTable(this.definition)} (${columns
-            .map((column) => quoteIdentifier(column.ast.name))
-            .join(", ")}) VALUES ${tuples.join(", ")}${returning ? " RETURNING *" : ""}`,
-          values,
-        },
-        options,
-        this.telemetry,
-        `${this.definition.$name}.insertMany`,
-      );
-      rowsAffected += result.rowCount;
-      if (returning) {
-        rows.push(...result.rows.map((row) => decodeRow(this.definition, row)));
-      }
-    }
-    return options.returning === "rows" ? rows : { rowsAffected };
+    return this.writeMany(inputs, options, "insertMany");
   }
 
   /** Updates the row matching the primary key with the given patch. */
@@ -431,75 +405,103 @@ export class TableClient<T extends AnyTable> {
       readonly returning?: "status" | "rows";
     } = {},
   ): Promise<WriteResult | readonly InferRow<T>[]> {
+    return this.writeMany(inputs, options, "upsertMany");
+  }
+
+  private async writeMany(
+    inputs: readonly InferInsert<T>[],
+    options: QueryOptions & { readonly chunkSize?: number; readonly returning?: "status" | "rows" },
+    operation: "insertMany" | "upsertMany",
+  ): Promise<WriteResult | readonly InferRow<T>[]> {
     if (
       options.returning !== undefined &&
       options.returning !== "status" &&
       options.returning !== "rows"
     ) {
-      throw new Error('upsertMany returning must be "status" or "rows".');
+      throw new Error(`${operation} returning must be "status" or "rows".`);
     }
     if (inputs.length === 0) return options.returning === "rows" ? [] : { rowsAffected: 0 };
-    const primary = Object.entries(this.definition.$columns).filter(
-      ([, column]) => column.ast.primaryKey,
-    );
-    if (primary.length === 0) throw new Error("upsertMany requires a primary key.");
-    let rowsAffected = 0;
-    const returned: InferRow<T>[] = [];
+    let conflict = "";
+    const allProperties = batchProperties(inputs as readonly Record<string, unknown>[]);
+    const columnsByProperty = this.definition.$columns;
+    for (const property of allProperties) {
+      if (!Object.hasOwn(columnsByProperty, property))
+        throw new Error(`Unknown ${this.definition.$name} property ${property}.`);
+    }
+    if (operation === "upsertMany") {
+      const keys = Object.values(columnsByProperty).filter((column) => column.ast.primaryKey);
+      if (!keys.length) throw new Error("upsertMany requires a primary key.");
+      const updates = allProperties
+        .filter((property) => !columnsByProperty[property]!.ast.primaryKey)
+        .map((property) => {
+          const name = quoteIdentifier(columnsByProperty[property]!.ast.name);
+          return `${name} = EXCLUDED.${name}`;
+        });
+      const target = keys.map((column) => quoteIdentifier(column.ast.name)).join(", ");
+      conflict = ` ON CONFLICT (${target}) DO ${updates.length ? "UPDATE SET " + updates.join(", ") : "NOTHING"}`;
+    }
     const chunkSize = options.chunkSize ?? 1000;
     if (!Number.isSafeInteger(chunkSize) || chunkSize < 1) throw new Error("Invalid chunkSize.");
-    const allProperties = batchProperties(inputs as readonly Record<string, unknown>[]);
-    const effectiveChunkSize = effectiveBatchChunkSize(
-      chunkSize,
-      allProperties.length,
-      "upsertMany",
-    );
+    const effectiveChunkSize = effectiveBatchChunkSize(chunkSize, allProperties.length, operation);
+    let rowsAffected = 0;
+    const rows: InferRow<T>[] = [];
     for (let index = 0; index < inputs.length; index += effectiveChunkSize) {
       const chunk = inputs.slice(index, index + effectiveChunkSize);
-      const columns = allProperties.map((property) => {
-        const column = this.definition.$columns[property];
-        if (!column) throw new Error(`Unknown ${this.definition.$name} property ${property}.`);
-        return column;
-      });
-      const values: unknown[] = [];
-      const tuples = chunk.map((input) => {
-        const record = input as Record<string, unknown>;
-        return `(${allProperties
-          .map((property) => {
-            if (!(property in record)) return "DEFAULT";
-            values.push(encode(this.definition.$columns[property]!, record[property]));
-            return `$${values.length}`;
-          })
-          .join(", ")})`;
-      });
-      const updates = allProperties.filter(
-        (property) => !this.definition.$columns[property]!.ast.primaryKey,
-      );
-      const query = {
-        text: `INSERT INTO ${qualifiedTable(this.definition)} (${columns.map((column) => quoteIdentifier(column.ast.name)).join(", ")}) VALUES ${tuples.join(", ")} ON CONFLICT (${primary.map(([, column]) => quoteIdentifier(column.ast.name)).join(", ")}) DO ${
-          updates.length === 0
-            ? "NOTHING"
-            : `UPDATE SET ${updates
-                .map((property) => {
-                  const name = quoteIdentifier(this.definition.$columns[property]!.ast.name);
-                  return `${name} = EXCLUDED.${name}`;
-                })
-                .join(", ")}`
-        }${options.returning === "rows" ? " RETURNING *" : ""}`,
-        values,
-      };
-      const result = await execute(
+      await writeChunk(
         this.adapter,
-        query,
-        options,
-        this.telemetry,
-        `${this.definition.$name}.upsertMany`,
+        chunk,
+        allProperties,
+        async (connection, group, properties) => {
+          const columns = properties.map((property) =>
+            quoteIdentifier(columnsByProperty[property]!.ast.name),
+          );
+          const values: unknown[] = [];
+          // SQLite has no DEFAULT tuple or UPSERT after DEFAULT VALUES. For an
+          // entirely omitted row, use the database's declared default for one
+          // writable column and leave every other column out of the statement.
+          let defaultTuple: string | undefined;
+          if (columns.length === 0) {
+            const name = columnsByProperty[allProperties[0]!]!.ast.name;
+            const result = await connection.execute<{ dflt_value: string | null }>(
+              {
+                text: "SELECT dflt_value FROM pragma_table_info($1) WHERE name = $2",
+                values: [this.definition.$name, name],
+              },
+              options,
+            );
+            columns.push(quoteIdentifier(name));
+            defaultTuple = `(${result.rows[0]?.dflt_value ?? "NULL"})`;
+          }
+          const tuples = group.map((input) => {
+            if (defaultTuple) return defaultTuple;
+            const record = input as Record<string, unknown>;
+            return `(${properties
+              .map((property) => {
+                if (!(property in record)) return "DEFAULT";
+                values.push(encode(this.definition.$columns[property]!, record[property]));
+                return `$${values.length}`;
+              })
+              .join(", ")})`;
+          });
+          const returning = options.returning === "rows";
+          const result = await execute(
+            connection,
+            {
+              text: `INSERT INTO ${qualifiedTable(this.definition)} (${columns.join(", ")}) VALUES ${tuples.join(", ")}${conflict}${returning ? " RETURNING *" : ""}`,
+              values,
+            },
+            options,
+            this.telemetry,
+            `${this.definition.$name}.${operation}`,
+          );
+          rowsAffected += result.rowCount;
+          if (returning) {
+            rows.push(...result.rows.map((row) => decodeRow(this.definition, row)));
+          }
+        },
       );
-      rowsAffected += result.rowCount;
-      if (options.returning === "rows") {
-        returned.push(...result.rows.map((row) => decodeRow(this.definition, row)));
-      }
     }
-    return options.returning === "rows" ? returned : { rowsAffected };
+    return options.returning === "rows" ? rows : { rowsAffected };
   }
 
   /** Inserts a single row, updating non-primary-key columns on conflict. See {@link upsertMany}. */
@@ -582,15 +584,33 @@ export function createDatabaseClient<
     };
     const effectiveAdapter: DatabaseAdapter = expires
       ? {
+          ...(currentAdapter.dialect && { dialect: currentAdapter.dialect }),
           execute(query, queryOptions) {
             assertActive();
             return currentAdapter.execute(query, queryOptions);
           },
-          stream(query, queryOptions) {
+          stream<Row>(query: SqlQuery, queryOptions?: QueryOptions) {
             assertActive();
             if (!currentAdapter.stream)
               throw new Error("Streaming is not supported by this adapter.");
-            return currentAdapter.stream(query, queryOptions);
+            const source = currentAdapter.stream<Row>(query, queryOptions);
+            return {
+              async *[Symbol.asyncIterator]() {
+                assertActive();
+                const iterator = source[Symbol.asyncIterator]();
+                try {
+                  while (true) {
+                    assertActive();
+                    const part = await iterator.next();
+                    if (part.done) return;
+                    assertActive();
+                    yield part.value;
+                  }
+                } finally {
+                  await iterator.return?.();
+                }
+              },
+            };
           },
           transaction(callback, transactionOptions) {
             assertActive();

@@ -15,6 +15,7 @@ export interface ExecutionResult<Row = Record<string, unknown>> {
 
 /** Low-level connection contract that dialect drivers implement and query/client code runs against. */
 export interface DatabaseAdapter {
+  readonly dialect?: DialectName;
   readonly identity?: string;
   execute<Row = Record<string, unknown>>(
     query: SqlQuery,
