@@ -1,3 +1,4 @@
+import { assertCodecConformance } from "./codec-conformance.fixture";
 import { assertValueConformance } from "./value-conformance.fixture";
 import { createDatabaseClient } from "./client";
 import { randomUUID } from "node:crypto";
@@ -69,6 +70,10 @@ integration("PostgreSQL adapter conformance", () => {
     );
     await pool.end();
     await adapter.close?.();
+  });
+
+  it("decodes mapped columns for every select entry point", async () => {
+    await assertCodecConformance(adapter);
   });
 
   it("should cover CRUD, returning, bulk chunking, joins, and preparation", async () => {

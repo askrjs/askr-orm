@@ -1,3 +1,4 @@
+import { assertCodecConformance } from "./codec-conformance.fixture";
 import { createDatabaseClient } from "./client";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -10,6 +11,155 @@ import { sqlite } from "./sqlite";
 import { createMigrationsApi } from "./migrations";
 
 describe("SQLite dialect", () => {
+  it.each(["commit", "rollback", "savepoint", "session"] as const)(
+    "queues root writes inherited from a finished %s",
+    async (scope) => {
+      const directory = await mkdtemp(path.join(tmpdir(), "askr-owner-"));
+      const driver = sqlite({ filename: path.join(directory, "database.sqlite") });
+      let adapter = await driver.open();
+      let release!: () => void;
+      const barrier = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let markStarted!: () => void;
+      const started = new Promise<void>((resolve) => {
+        markStarted = resolve;
+      });
+      let insert!: Promise<unknown>;
+      try {
+        const items = table("items", { id: text().primaryKey() });
+        const db = createDatabaseClient({ items }, adapter);
+        await adapter.execute({ text: "CREATE TABLE items (id text primary key)", values: [] });
+        const schedule = async () => {
+          insert = barrier.then(() => {
+            const write = db.items.insert({ id: "root" });
+            markStarted();
+            return write;
+          });
+        };
+        if (scope === "commit") await adapter.transaction(schedule);
+        if (scope === "session") await adapter.session!(schedule);
+        if (scope === "savepoint") await adapter.transaction((tx) => tx.transaction(schedule));
+        if (scope === "rollback")
+          await expect(
+            adapter.transaction(async () => {
+              await schedule();
+              throw new Error("rollback A");
+            }),
+          ).rejects.toThrow("rollback A");
+        await expect(
+          adapter.transaction(async (tx) => {
+            await tx.execute({ text: "INSERT INTO items VALUES ('rollback')", values: [] });
+            release();
+            await started;
+            throw new Error("rollback B");
+          }),
+        ).rejects.toThrow("rollback B");
+        await expect(insert).resolves.toMatchObject({ rowsAffected: 1 });
+        await adapter.close?.();
+        adapter = await driver.open();
+        expect((await adapter.execute({ text: "SELECT id FROM items", values: [] })).rows).toEqual([
+          { id: "root" },
+        ]);
+      } finally {
+        await adapter.close?.();
+        await rm(directory, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("rejects escaped transaction clients and iterators before their next query", async () => {
+    const items = table("items", { id: text().primaryKey() });
+    const adapter = await sqlite({ filename: ":memory:" }).open();
+    try {
+      await adapter.execute({ text: "CREATE TABLE items(id text primary key)", values: [] });
+      const db = createDatabaseClient({ items }, adapter);
+      await db.items.insertMany([{ id: "a" }, { id: "b" }]);
+      const { tx, started, unread } = await db.transaction(async (tx) => {
+        const started = tx.items.stream()[Symbol.asyncIterator]();
+        expect((await started.next()).done).toBe(false);
+        return { tx, started, unread: tx.items.stream()[Symbol.asyncIterator]() };
+      });
+      await expect(tx.items.insert({ id: "escaped" })).rejects.toThrow(/no longer active/);
+      await expect(started.next()).rejects.toThrow(/no longer active/);
+      await expect(unread.next()).rejects.toThrow(/no longer active/);
+      expect(await db.items.get("escaped")).toBeNull();
+    } finally {
+      await adapter.close?.();
+    }
+  });
+  it("decodes mapped columns for every select entry point", async () => {
+    const adapter = await sqlite({ filename: ":memory:" }).open();
+    try {
+      await assertCodecConformance(adapter);
+    } finally {
+      await adapter.close?.();
+    }
+  });
+
+  it("uses the database default when a batch contains completely empty rows", async () => {
+    const items = table("items", {
+      id: text().primaryKey().default("'declared'"),
+      label: text().default("'declared'"),
+    });
+    const adapter = await sqlite({ filename: ":memory:" }).open();
+    try {
+      await adapter.execute({
+        text: "CREATE TABLE items(id text primary key default 'db-id', label text default 'db-label')",
+        values: [],
+      });
+      const db = createDatabaseClient({ items }, adapter);
+      const options = { returning: "rows" as const };
+      expect(await db.items.insertMany([{ id: "first", label: "one" }, {}], options)).toEqual([
+        { id: "first", label: "one" },
+        { id: "db-id", label: "db-label" },
+      ]);
+      expect(await db.items.upsertMany([{ id: "db-id", label: "changed" }, {}], options)).toEqual([
+        { id: "db-id", label: "changed" },
+        { id: "db-id", label: "db-label" },
+      ]);
+    } finally {
+      await adapter.close?.();
+    }
+  });
+  it.each([1, 3])("applies SQLite bulk defaults at chunk size %i", async (chunkSize) => {
+    const items = table("items", { id: text().primaryKey(), label: text().default("'default'") });
+    const adapter = await sqlite({ filename: ":memory:" }).open();
+    try {
+      await adapter.execute({
+        text: "CREATE TABLE items(id text primary key, label text default 'default')",
+        values: [],
+      });
+      const db = createDatabaseClient({ items }, adapter);
+      const options = { chunkSize, returning: "rows" as const };
+      expect(
+        await db.items.insertMany(
+          [{ id: "a", label: "first" }, { id: "b" }, { id: "c", label: null }],
+          options,
+        ),
+      ).toEqual([
+        { id: "a", label: "first" },
+        { id: "b", label: "default" },
+        { id: "c", label: null },
+      ]);
+      expect(
+        await db.items.upsertMany([{ id: "a" }, { id: "b", label: null }, { id: "c" }], options),
+      ).toEqual([
+        { id: "a", label: "default" },
+        { id: "b", label: null },
+        { id: "c", label: "default" },
+      ]);
+      if (chunkSize === 3) {
+        await expect(
+          db.items.insertMany([{ id: "new" }, { id: "a", label: "duplicate" }], options),
+        ).rejects.toThrow();
+        expect(await db.items.get("new")).toBeNull();
+      }
+    } finally {
+      await adapter.close?.();
+    }
+  });
+
   it("should match escaped LIKE wildcards as literal text", async () => {
     const items = table("items", { value: text().primaryKey() });
     const adapter = await sqlite({ filename: ":memory:" }).open();

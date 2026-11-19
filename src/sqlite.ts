@@ -18,6 +18,8 @@ export interface SqliteOptions {
 }
 
 interface QueueContext {
+  active: boolean;
+  readonly parent?: QueueContext | undefined;
   readonly adapter: SqliteAdapter;
   readonly nestedQueue: SqliteQueue;
 }
@@ -54,6 +56,7 @@ class SqliteQueue {
 }
 
 class SqliteAdapter implements DatabaseAdapter {
+  readonly dialect = "sqlite";
   readonly identity: string;
   private readonly queue: SqliteQueue;
   private savepoint = 0;
@@ -69,6 +72,40 @@ class SqliteAdapter implements DatabaseAdapter {
     this.identity = identity;
     this.queue = queue;
     database.exec("PRAGMA foreign_keys = ON");
+  }
+
+  private currentOwner(): QueueContext | undefined {
+    const owner = context.getStore();
+    if (owner?.adapter !== this) return undefined;
+    for (let scope: QueueContext | undefined = owner; scope; scope = scope.parent) {
+      if (!scope.active) return undefined;
+    }
+    return owner;
+  }
+
+  private withOwner<T>(operation: () => Promise<T>, sharedQueue?: SqliteQueue): Promise<T> {
+    const nestedQueue = sharedQueue ?? new SqliteQueue();
+    const owner = {
+      adapter: this,
+      nestedQueue,
+      active: true,
+      parent: sharedQueue ? this.currentOwner() : undefined,
+    };
+    return context.run(owner, async () => {
+      try {
+        return await operation();
+      } finally {
+        // A started savepoint must finish before its parent releases the connection.
+        if (!sharedQueue) {
+          let tail;
+          do {
+            tail = nestedQueue.tail;
+            await tail;
+          } while (tail !== nestedQueue.tail);
+        }
+        owner.active = false;
+      }
+    });
   }
 
   private assertOpen(): void {
@@ -112,7 +149,7 @@ class SqliteAdapter implements DatabaseAdapter {
 
   execute<Row>(query: SqlQuery, options: QueryOptions = {}): Promise<ExecutionResult<Row>> {
     if (options.signal?.aborted) return Promise.reject(options.signal.reason);
-    if (context.getStore()?.adapter === this) return Promise.resolve(this.perform<Row>(query));
+    if (this.currentOwner()) return Promise.resolve(this.perform<Row>(query));
     return this.queue.run(async () => {
       if (options.signal?.aborted) throw options.signal.reason;
       return this.perform<Row>(query);
@@ -125,13 +162,12 @@ class SqliteAdapter implements DatabaseAdapter {
       if (options.signal?.aborted) throw options.signal.reason;
       this.database.exec(sqliteSql(sql));
     };
-    if (context.getStore()?.adapter === this) perform();
+    if (this.currentOwner()) perform();
     else await this.queue.run(async () => perform());
   }
 
   async *stream<Row>(query: SqlQuery, options: QueryOptions = {}): AsyncIterable<Row> {
-    const release =
-      context.getStore()?.adapter === this ? () => undefined : await this.queue.acquire();
+    let release = this.currentOwner() ? undefined : await this.queue.acquire();
     try {
       this.assertOpen();
       const compiled = sqliteQuery(query);
@@ -139,9 +175,11 @@ class SqliteAdapter implements DatabaseAdapter {
       for (const row of statement.iterate(...(compiled.values as never[]))) {
         if (options.signal?.aborted) throw options.signal.reason;
         yield row as Row;
+        // A root iterator can be resumed after the transaction that opened it.
+        if (!release && !this.currentOwner()) release = await this.queue.acquire();
       }
     } finally {
-      release();
+      release?.();
     }
   }
 
@@ -149,34 +187,35 @@ class SqliteAdapter implements DatabaseAdapter {
     callback: (adapter: DatabaseAdapter) => Promise<T>,
     _options?: TransactionOptions,
   ): Promise<T> {
-    const current = context.getStore();
-    if (current?.adapter === this) {
-      return current.nestedQueue.run(() =>
-        context.run({ adapter: this, nestedQueue: new SqliteQueue() }, () => this.nested(callback)),
-      );
+    const current = this.currentOwner();
+    if (current) {
+      return current.nestedQueue
+        .run(async () =>
+          this.currentOwner() ? { result: await this.nested(callback) } : undefined,
+        )
+        .then((completed) => (completed ? completed.result : this.transaction(callback)));
     }
-    return this.queue.run(() =>
-      context.run({ adapter: this, nestedQueue: new SqliteQueue() }, async () => {
+    return this.queue.run(async () => {
+      this.assertOpen();
+      this.database.exec("BEGIN");
+      try {
+        const result = await this.withOwner(() => callback(this));
         this.assertOpen();
-        this.database.exec("BEGIN");
-        try {
-          const result = await callback(this);
-          this.assertOpen();
-          this.database.exec("COMMIT");
-          return result;
-        } catch (error) {
-          this.bestEffortExec("ROLLBACK");
-          throw error;
-        }
-      }),
-    );
+        this.database.exec("COMMIT");
+        return result;
+      } catch (error) {
+        this.bestEffortExec("ROLLBACK");
+        throw error;
+      }
+    });
   }
 
   async session<T>(callback: (adapter: DatabaseAdapter) => Promise<T>): Promise<T> {
     this.assertOpen();
-    if (context.getStore()?.adapter === this) return callback(this);
+    const current = this.currentOwner();
+    if (current) return this.withOwner(() => callback(this), current.nestedQueue);
     return this.queue.run(() =>
-      context.run({ adapter: this, nestedQueue: new SqliteQueue() }, () => {
+      this.withOwner(() => {
         this.assertOpen();
         return callback(this);
       }),
@@ -192,7 +231,7 @@ class SqliteAdapter implements DatabaseAdapter {
     const name = `askr_${++this.savepoint}`;
     this.database.exec(`SAVEPOINT ${name}`);
     try {
-      const result = await callback(this);
+      const result = await this.withOwner(() => callback(this));
       this.database.exec(`RELEASE SAVEPOINT ${name}`);
       return result;
     } catch (error) {

@@ -85,7 +85,7 @@ function appendQuery(target: { text: string; values: unknown[] }, query: SqlQuer
 
 function compileState(state: QueryState): {
   readonly query: SqlQuery;
-  readonly aliases: readonly string[];
+  readonly fields: readonly ProjectedField[];
 } {
   const output = { text: "", values: [] as unknown[] };
   if (state.ctes.length > 0) {
@@ -99,19 +99,19 @@ function compileState(state: QueryState): {
     output.text += " ";
   }
   output.text += `SELECT${state.distinct ? " DISTINCT" : ""} `;
-  const selection =
-    state.selection ??
-    Object.fromEntries(
-      Object.entries(state.source.$columns).map(([property, column]) => [
-        property,
-        {
-          kind: "column-ref",
-          tableAlias: state.sourceAlias,
-          columnName: column.ast.name,
-        } satisfies ColumnRef,
-      ]),
-    );
-  const aliases = Object.keys(selection);
+  const selection = state.selection ?? state.references[state.sourceAlias]!;
+  const fields = Object.entries(selection).map(([alias, expression]) => {
+    if (!state.selection) return { alias, codec: state.source.$columns[alias]?.ast.codec };
+    if (!("kind" in expression) || expression.kind !== "column-ref") return { alias };
+    const table =
+      expression.tableAlias === state.sourceAlias
+        ? state.source
+        : state.joins.find((join) => join.alias === expression.tableAlias)?.table;
+    const codec = Object.values(table?.$columns ?? {}).find(
+      (column) => column.ast.name === expression.columnName,
+    )?.ast.codec;
+    return { alias, codec };
+  });
   Object.entries(selection).forEach(([alias, expression], index) => {
     if (index > 0) output.text += ", ";
     appendQuery(output, expressionQuery(expression));
@@ -158,16 +158,23 @@ function compileState(state: QueryState): {
     if (!Number.isSafeInteger(state.offset) || state.offset < 0) throw new Error("Invalid OFFSET.");
     output.text += ` OFFSET ${state.offset}`;
   }
-  return { query: output, aliases };
+  return { query: output, fields };
 }
 
-function mapRows<Row>(
-  rows: readonly Record<string, unknown>[],
-  aliases: readonly string[],
-): readonly Row[] {
-  return rows.map((row) =>
-    Object.freeze(Object.fromEntries(aliases.map((alias) => [alias, row[alias]]))),
-  ) as unknown as readonly Row[];
+interface ProjectedField {
+  alias: string;
+  codec?: import("./schema").Codec<unknown, unknown> | undefined;
+}
+
+function mapRow<Row>(row: Record<string, unknown>, fields: readonly ProjectedField[]): Row {
+  return Object.freeze(
+    Object.fromEntries(
+      fields.map(({ alias, codec }) => {
+        const value = row[alias];
+        return [alias, codec && value !== null ? codec.decode(value) : value];
+      }),
+    ),
+  ) as Row;
 }
 
 /**
@@ -315,7 +322,7 @@ export class SelectQuery<Row, Refs extends AnyReferences> {
     const compiled = compileState(this.state);
     try {
       const result = await this.adapter.execute<Record<string, unknown>>(compiled.query, options);
-      return mapRows<Row>(result.rows, compiled.aliases);
+      return result.rows.map((row) => mapRow<Row>(row, compiled.fields));
     } catch (error) {
       throw normalizeDatabaseError(error);
     }
@@ -338,7 +345,7 @@ export class SelectQuery<Row, Refs extends AnyReferences> {
             ...options,
             preparedName: name,
           });
-          return mapRows<Row>(result.rows, compiled.aliases);
+          return result.rows.map((row) => mapRow<Row>(row, compiled.fields));
         } catch (error) {
           throw normalizeDatabaseError(error);
         }
@@ -353,12 +360,12 @@ export class SelectQuery<Row, Refs extends AnyReferences> {
     }
     const compiled = compileState(this.state);
     const source = this.adapter.stream<Record<string, unknown>>(compiled.query, options);
-    const aliases = compiled.aliases;
+
     return {
       async *[Symbol.asyncIterator]() {
         try {
           for await (const row of source) {
-            yield mapRows<Row>([row], aliases)[0] as Row;
+            yield mapRow<Row>(row, compiled.fields);
           }
         } catch (error) {
           throw normalizeDatabaseError(error);
