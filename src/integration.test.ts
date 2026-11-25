@@ -357,6 +357,33 @@ integration("PostgreSQL adapter conformance", () => {
     }
   });
 
+  it("should roll back a PostgreSQL migration when the applied ledger row is rejected", async () => {
+    await pool.query('DROP TABLE IF EXISTS "_askr_migrations", "orm_migration_ledger_failure"');
+    const migrations = createMigrationsApi(adapter, {
+      migrations: [
+        {
+          id: "01LEDGERFAILURE",
+          parent: null,
+          checksum: "ledger-failure",
+          transactional: true,
+          sql: 'CREATE TABLE "orm_migration_ledger_failure" ("id" integer PRIMARY KEY)',
+        },
+      ],
+    });
+    try {
+      await migrations.plan();
+      await pool.query(`ALTER TABLE "_askr_migrations" ADD CHECK ("id" <> '01LEDGERFAILURE')`);
+      await expect(migrations.apply()).rejects.toMatchObject({ code: "23514" });
+      expect(
+        (await pool.query("SELECT to_regclass('public.orm_migration_ledger_failure') AS name"))
+          .rows,
+      ).toEqual([{ name: null }]);
+      expect((await pool.query('SELECT id FROM "_askr_migrations"')).rows).toEqual([]);
+    } finally {
+      await pool.query('DROP TABLE IF EXISTS "_askr_migrations", "orm_migration_ledger_failure"');
+    }
+  });
+
   it("should release the migration lock and leave no application DDL or ledger entry after self-disconnect", async () => {
     await pool.query('DROP TABLE IF EXISTS "_askr_migrations", "orm_migration_disconnect"');
     const manifest: MigrationManifest = {
