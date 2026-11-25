@@ -19,10 +19,10 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Setup Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@v7.1.0
         with:
           node-version: "lts/*"
           cache: npm
@@ -37,7 +37,7 @@ jobs:
 
       - name: Upload implementation coverage
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: orm-coverage-${{ matrix.os }}
           path: coverage
@@ -78,10 +78,10 @@ jobs:
       ASKR_ORM_TEST_SHADOW_URL: postgresql://postgres:postgres@127.0.0.1:5432/askr_orm_test_shadow
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Setup Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@v7.1.0
         with:
           node-version: "lts/*"
           cache: npm
