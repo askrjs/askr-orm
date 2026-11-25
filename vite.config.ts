@@ -28,6 +28,10 @@ export default defineConfig({
     unbundle: true,
     outExtensions: () => ({ js: ".js" }),
     deps: {
+      // tsdown <0.23 compatibility: resolve external dependency subpaths.
+      // Remove to preserve subpath imports as written (the new default).
+      // https://tsdown.dev/options/dependencies#deps-resolvedepsubpath
+      resolveDepSubpath: true,
       neverBundle: ["pg", "pg-query-stream", "tsx/esm/api", "typescript"],
     },
   },

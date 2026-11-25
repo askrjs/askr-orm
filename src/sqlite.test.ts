@@ -1,5 +1,5 @@
-import { assertCodecConformance } from "./codec-conformance.fixture";
 import { createDatabaseClient } from "./client";
+import { assertCodecConformance } from "./codec-conformance.fixture";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
