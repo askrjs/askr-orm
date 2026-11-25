@@ -196,7 +196,7 @@ class SqliteAdapter implements DatabaseAdapter {
         .then((completed) => (completed ? completed.result : this.transaction(callback)));
     }
     return this.queue.run(() =>
-      context.run({ adapter: this, nestedQueue: new SqliteQueue() }, async () => {
+      context.run({ adapter: this, nestedQueue: new SqliteQueue(), active: true }, async () => {
         this.assertOpen();
         this.database.exec("BEGIN");
         try {
@@ -216,7 +216,7 @@ class SqliteAdapter implements DatabaseAdapter {
     this.assertOpen();
     if (context.getStore()?.adapter === this) return callback(this);
     return this.queue.run(() =>
-      context.run({ adapter: this, nestedQueue: new SqliteQueue() }, () => {
+      context.run({ adapter: this, nestedQueue: new SqliteQueue(), active: true }, () => {
         this.assertOpen();
         return callback(this);
       }),
