@@ -92,10 +92,10 @@ try {
       "--no-package-lock",
       "--no-save",
       path.join(consumer, packed.filename),
-      "pg@8.23.0",
-      "pg-query-stream@4.17.0",
+      "pg@8.23.1",
+      "pg-query-stream@4.17.1",
       "@types/pg@8.23.1",
-      "@types/node@26.3.0",
+      "@types/node@26.6.10",
     ],
     consumer,
   );
@@ -225,7 +225,7 @@ void [generated, codec, postgresOptions, invalidPool, sqliteOptions];\n`,
       ),
       removed: Object.values(contract.entrypoints).reduce((n, c) => n + c.removed.length, 0),
       privateSubpaths: contract.privateSubpaths.length,
-      postgresPeers: ["8.23.0", "4.17.0"],
+      postgresPeers: ["8.23.1", "4.17.1"],
       postgresWorkflow: postgresWorkflow
         ? "installed generate, validate, unchanged generate; TS6/7 artifact"
         : "not run without explicit test databases",
