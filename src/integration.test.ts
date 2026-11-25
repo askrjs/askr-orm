@@ -286,7 +286,7 @@ integration("PostgreSQL adapter conformance", () => {
     expect(fresh.rows[0]!.pid).not.toBe(killed);
   });
 
-  it("should apply every statement of a PostgreSQL migration script atomically", async () => {
+  it("should apply every statement of a PostgreSQL migration script", async () => {
     await pool.query('DROP TABLE IF EXISTS "_askr_migrations", "orm_migration_script"');
     const manifest: MigrationManifest = {
       migrations: [
@@ -313,6 +313,74 @@ integration("PostgreSQL adapter conformance", () => {
       expect((await migrations.plan()).pending).toHaveLength(0);
     } finally {
       await pool.query('DROP TABLE IF EXISTS "_askr_migrations", "orm_migration_script"');
+    }
+  });
+
+  it("should roll back a transactional PostgreSQL migration when a later statement fails", async () => {
+    await pool.query('DROP TABLE IF EXISTS "_askr_migrations", "orm_migration_rollback"');
+    const createAndSeed =
+      'CREATE TABLE "orm_migration_rollback" ("id" integer PRIMARY KEY); INSERT INTO "orm_migration_rollback" VALUES (1);';
+    const migration = {
+      id: "01PGROLLBACK",
+      parent: null,
+      transactional: true,
+    } as const;
+    const broken = createMigrationsApi(adapter, {
+      migrations: [
+        {
+          ...migration,
+          checksum: "broken",
+          sql: createAndSeed + ' INSERT INTO "orm_migration_rollback" VALUES (1);',
+        },
+      ],
+    });
+    try {
+      // A duplicate key proves PostgreSQL reached the last statement after inserting the first row.
+      await expect(broken.apply()).rejects.toMatchObject({ code: "23505" });
+      expect(
+        (await pool.query("SELECT to_regclass('public.orm_migration_rollback') AS name")).rows,
+      ).toEqual([{ name: null }]);
+      expect((await pool.query('SELECT id FROM "_askr_migrations"')).rows).toEqual([]);
+
+      const corrected = createMigrationsApi(adapter, {
+        migrations: [{ ...migration, checksum: "corrected", sql: createAndSeed }],
+      });
+      await expect(corrected.apply()).resolves.toEqual({ applied: [migration.id] });
+      expect((await pool.query('SELECT id FROM "orm_migration_rollback"')).rows).toEqual([
+        { id: 1 },
+      ]);
+      expect((await pool.query('SELECT id, state FROM "_askr_migrations"')).rows).toEqual([
+        { id: migration.id, state: "applied" },
+      ]);
+    } finally {
+      await pool.query('DROP TABLE IF EXISTS "_askr_migrations", "orm_migration_rollback"');
+    }
+  });
+
+  it("should roll back a PostgreSQL migration when the applied ledger row is rejected", async () => {
+    await pool.query('DROP TABLE IF EXISTS "_askr_migrations", "orm_migration_ledger_failure"');
+    const migrations = createMigrationsApi(adapter, {
+      migrations: [
+        {
+          id: "01LEDGERFAILURE",
+          parent: null,
+          checksum: "ledger-failure",
+          transactional: true,
+          sql: 'CREATE TABLE "orm_migration_ledger_failure" ("id" integer PRIMARY KEY)',
+        },
+      ],
+    });
+    try {
+      await migrations.plan();
+      await pool.query(`ALTER TABLE "_askr_migrations" ADD CHECK ("id" <> '01LEDGERFAILURE')`);
+      await expect(migrations.apply()).rejects.toMatchObject({ code: "23514" });
+      expect(
+        (await pool.query("SELECT to_regclass('public.orm_migration_ledger_failure') AS name"))
+          .rows,
+      ).toEqual([{ name: null }]);
+      expect((await pool.query('SELECT id FROM "_askr_migrations"')).rows).toEqual([]);
+    } finally {
+      await pool.query('DROP TABLE IF EXISTS "_askr_migrations", "orm_migration_ledger_failure"');
     }
   });
 
