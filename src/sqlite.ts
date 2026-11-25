@@ -162,7 +162,7 @@ class SqliteAdapter implements DatabaseAdapter {
       if (options.signal?.aborted) throw options.signal.reason;
       this.database.exec(sqliteSql(sql));
     };
-    if (this.currentOwner()) perform();
+    if (context.getStore()?.adapter === this) perform();
     else await this.queue.run(async () => perform());
   }
 
@@ -195,27 +195,28 @@ class SqliteAdapter implements DatabaseAdapter {
         )
         .then((completed) => (completed ? completed.result : this.transaction(callback)));
     }
-    return this.queue.run(async () => {
-      this.assertOpen();
-      this.database.exec("BEGIN");
-      try {
-        const result = await this.withOwner(() => callback(this));
+    return this.queue.run(() =>
+      context.run({ adapter: this, nestedQueue: new SqliteQueue() }, async () => {
         this.assertOpen();
-        this.database.exec("COMMIT");
-        return result;
-      } catch (error) {
-        this.bestEffortExec("ROLLBACK");
-        throw error;
-      }
-    });
+        this.database.exec("BEGIN");
+        try {
+          const result = await callback(this);
+          this.assertOpen();
+          this.database.exec("COMMIT");
+          return result;
+        } catch (error) {
+          this.bestEffortExec("ROLLBACK");
+          throw error;
+        }
+      }),
+    );
   }
 
   async session<T>(callback: (adapter: DatabaseAdapter) => Promise<T>): Promise<T> {
     this.assertOpen();
-    const current = this.currentOwner();
-    if (current) return this.withOwner(() => callback(this), current.nestedQueue);
+    if (context.getStore()?.adapter === this) return callback(this);
     return this.queue.run(() =>
-      this.withOwner(() => {
+      context.run({ adapter: this, nestedQueue: new SqliteQueue() }, () => {
         this.assertOpen();
         return callback(this);
       }),

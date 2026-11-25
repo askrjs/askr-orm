@@ -1,4 +1,3 @@
-import { assertCodecConformance } from "./codec-conformance.fixture";
 import { assertValueConformance } from "./value-conformance.fixture";
 import { createDatabaseClient } from "./client";
 import { randomUUID } from "node:crypto";

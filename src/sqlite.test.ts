@@ -1,4 +1,3 @@
-import { assertCodecConformance } from "./codec-conformance.fixture";
 import { createDatabaseClient } from "./client";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
