@@ -196,12 +196,25 @@ describe("database client", () => {
       .distinct()
       .groupBy(({ users: columns }) => columns.email)
       .having(eq(columnRef("users", "email"), "a@example.com"))
+      .where(({ users: columns }) => eq(columns.email, "a@example.com"))
       .orderBy(({ users: columns }) => columns.email)
       .limit(5)
       .offset(2);
-    expect(query.toSQL().text).toContain("GROUP BY");
+    const originalSql = query.toSQL();
+    const derived = query.where(({ users: columns }) => eq(columns.groupId, "g"));
+    expect(query.toSQL()).toEqual(originalSql);
+    expect(derived.toSQL().text).toContain("GROUP BY");
+    expect(derived.toSQL().text).toContain("AND");
     expect(db.users.prepare("all-users").name).toBe("all-users");
-    await expect(db.users.limit(1).execute()).resolves.toHaveLength(1);
+    adapter.rows = [{ id: "original", email: "a@example.com", groupId: "g" }];
+    await expect(query.execute()).resolves.toEqual([
+      { id: "original", email: "a@example.com", groupId: "g" },
+    ]);
+    adapter.rows = [{ id: "derived", email: "a@example.com", groupId: "g" }];
+    await expect(derived.execute()).resolves.toEqual([
+      { id: "derived", email: "a@example.com", groupId: "g" },
+    ]);
+    expect(adapter.queries.slice(-2)).toEqual([originalSql, derived.toSQL()]);
   });
 
   it("should cover update, delete, upsert, and composite keys", async () => {
