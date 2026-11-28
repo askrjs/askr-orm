@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.5.2 - 2026-11-28
+
+### Fixed
+
+- Correct SQLite write isolation, bulk defaults, and projected column decoding.
+
 ## 0.5.0 - 2026-10-12
 
 ### Breaking
